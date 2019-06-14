@@ -5,6 +5,7 @@ from tensorpack.tfutils.gradproc import GlobalNormClip, SummaryGradient
 from tensorpack import ProxyDataFlow
 from tensorpack.dataflow import MultiProcessRunnerZMQ,LMDBSerializer
 from tensorpack.callbacks import GPUMemoryTracker
+from tensorpack.utils import logger
 import gensim
 
 class getbatch(ProxyDataFlow):

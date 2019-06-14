@@ -1,7 +1,6 @@
 from tensorpack import *
 from tensorpack.dataflow import DataFlow, LMDBSerializer,DataFromList
-from helper import *
-import json
+import argparse
 try:
     import cPickle as pickle
 except:
@@ -15,8 +14,6 @@ class Raw(DataFromList):
     def __len__(self):
         return len(self.data)
     def __iter__(self):
-        # X,Pos1,Pos2,DepMask,HeadPos,TailPos=[],[],[],[],[],[]
-        # DepLabel,ReLabel,HeadLabel,TailLabel=[],[],[],[]
         for bag in data:
             X=bag['X']
             Pos1=bag['Pos1']
