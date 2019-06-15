@@ -209,12 +209,11 @@ class WarmupModel(ModelDesc):
 
         label_y = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
 
-        #TO-Do accuracy计算
         # accuracy的统计
-        # logits=tf.nn.softmax(nn_dep_out)
-        # y_pred=tf.argmax(logits,axis=1)
-        # y_actual=tf.argmax(label_y,axis=1)
-        # accuracy=tf.cast(tf.equal(y_pred,y_actual),tf.float32,name='accu')
+        logits=tf.nn.softmax(nn_dep_out)
+        y_pred=tf.argmax(logits,axis=-1)
+        y_actual=tf.argmax(label_y,axis=-1)
+        accuracy=tf.cast(tf.equal(y_pred,y_actual),tf.float32,name='accu')
 
         dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=label_y)
         dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
@@ -223,7 +222,7 @@ class WarmupModel(ModelDesc):
             loss += tf.contrib.layers.apply_regularization(self.regularizer,
                                                            tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
         loss = tf.identity(loss, name='total_loss')
-        summary.add_moving_summary(loss)
+        summary.add_moving_summary(loss,accuracy)
         return loss
 
     def optimizer(self):
@@ -448,9 +447,9 @@ def get_config(ds_train, ds_test, params):
             StatMonitorParamSetter('learning_rate', 'total_loss',
                                    lambda x: x * 0.2, 0, 5),
             HumanHyperParamSetter('learning_rate'),
-            # PeriodicTrigger(
-            # InferenceRunner(ds_test, [ScalarStats('total_loss'),ClassificationError('accu','accuracy')]),
-            # every_k_epochs=2),
+            PeriodicTrigger(
+            InferenceRunner(ds_test, [ScalarStats('total_loss'),ClassificationError('accu','accuracy')]),
+            every_k_epochs=2),
             MovingAverageSummary(),
             MergeAllSummaries(),
             GPUUtilizationTracker(),
