@@ -180,12 +180,8 @@ class WarmupModel(ModelDesc):
 
             # bilinear classifier excluding the final dot product
             arc_head = tf.layers.dense(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
-            W = tf.get_variable('shared_W', shape=[self.params.projection_size, self.num_dep_class,
+            W = tf.get_variable('shared_W', shape=[self.params.projection_size, 1,
                                                    self.params.depparse_projection_size])
-            Wr = tf.get_variable('relation_specific_W',
-                                 shape=[self.params.projection_size, self.params.depparse_projection_size])
-            Wr_proj = tf.tile(tf.expand_dims(Wr, axis=-2), [1, self.num_dep_class, 1])
-            W += Wr_proj
             arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
             shape = tf.shape(arc_dep)
             arc_dep = tf.reshape(arc_dep, [shape[0], -1, self.params.depparse_projection_size])
@@ -198,22 +194,22 @@ class WarmupModel(ModelDesc):
 
             # compute the scores for each candidate arc
             word_score = tf.matmul(arc_head, arc_dep, transpose_b=True)
-            root_score = tf.layers.dense(arc_head, self.num_dep_class, name='root_score')
-            arc_scores = tf.concat([word_score, root_score], axis=-1)
+            arc_scores = word_score
 
             # disallow the model from making impossible predictions
             mask_shape = tf.shape(dep_mask)
-            dep_mask_ = tf.tile(tf.expand_dims(dep_mask, -1), [1, 1, self.num_dep_class])
-            dep_mask_ = tf.reshape(dep_mask_, [-1, mask_shape[1] * self.num_dep_class])
-            dep_mask_ = tf.concat(
-                [tf.ones((mask_shape[0], 1)), tf.zeros((mask_shape[0], self.num_dep_class - 1)), dep_mask_],
-                axis=1)
-            dep_mask_ = tf.tile(tf.expand_dims(dep_mask_, 1), [1, mask_shape[1], 1])
+            # dep_mask_ = tf.tile(tf.expand_dims(dep_mask, -1), [1, 1, 1])
+            # dep_mask_ = tf.expand_dims(dep_mask, -1)
+            # dep_mask_ = tf.reshape(dep_mask_, [-1, mask_shape[1]])
+
+            # dep_mask_ = tf.tile(tf.expand_dims(dep_mask_, 1), [1, mask_shape[1], 1])
+            dep_mask_ = tf.tile(tf.expand_dims(dep_mask, 1), [1, mask_shape[1], 1])
             arc_scores += (dep_mask_ - 1) * 100
             nn_dep_out = arc_scores
 
         label_y = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
 
+        #TO-Do accuracy计算
         # accuracy的统计
         # logits=tf.nn.softmax(nn_dep_out)
         # y_pred=tf.argmax(logits,axis=1)
@@ -235,7 +231,6 @@ class WarmupModel(ModelDesc):
         opt = tf.train.AdamOptimizer(lr)
         return optimizer.apply_grad_processors(
             opt, [GlobalNormClip(5), SummaryGradient()])
-
 
 class Model(ModelDesc):
     def __init__(self, params):
@@ -438,14 +433,12 @@ class Model(ModelDesc):
         return optimizer.apply_grad_processors(
             opt, [GlobalNormClip(5), SummaryGradient()])
 
-
 def getdata(path, isTrain):
     ds = LMDBSerializer.load(path, shuffle=isTrain)
     ds = getbatch(ds, 64, isTrain)
     if isTrain:
         ds = MultiProcessRunnerZMQ(ds, 4)
     return ds
-
 
 def get_config(ds_train, ds_test, params):
     return TrainConfig(
@@ -467,7 +460,6 @@ def get_config(ds_train, ds_test, params):
         model=WarmupModel(params),
         max_epoch=4,
     )
-
 
 def resume_train(ds_train, ds_test, params):
     return AutoResumeTrainConfig(
