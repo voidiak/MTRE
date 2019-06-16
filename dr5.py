@@ -167,19 +167,20 @@ class WarmupModel(ModelDesc):
 
         with tf.variable_scope('dep_predictions'):
             # Projection 考虑现在hidden states是多个句子的串联，用cnn
-            arc_dep_hidden = FullyConnected(hidden_states, self.params.projection_size, name='arc_dep_hidden')
-            arc_head_hidden = FullyConnected(hidden_states, self.params.projection_size, name='arc_head_hidden')
-
+            # arc_dep_hidden = FullyConnected('arc_dep_hidden',hidden_states, self.params.projection_size)
+            # arc_head_hidden = FullyConnected('arc_head_hidden',hidden_states, self.params.projection_size)
+            arc_dep_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_dep_hidden')
+            arc_head_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_head_hidden')
             # activation
-            arc_dep_hidden = BNReLU(arc_dep_hidden)
-            arc_head_hidden = BNReLU(arc_head_hidden)
+            arc_dep_hidden = tf.nn.relu(arc_dep_hidden)
+            arc_head_hidden = tf.nn.relu(arc_head_hidden)
 
             # dropout
             arc_dep_hidden = Dropout(arc_dep_hidden, keep_prob=dropout)
             arc_head_hidden = Dropout(arc_head_hidden, keep_prob=dropout)
 
             # bilinear classifier excluding the final dot product
-            arc_head = FullyConnected(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
+            arc_head = tf.layers.dense(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
             W = tf.get_variable('shared_W', shape=[self.params.projection_size, 1,
                                                    self.params.depparse_projection_size])
             arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
@@ -211,8 +212,8 @@ class WarmupModel(ModelDesc):
 
         # accuracy的统计
         logits=tf.nn.softmax(nn_dep_out)
-        y_pred=tf.argmax(logits,axis=-1)
-        y_actual=tf.argmax(label_y,axis=-1)
+        y_pred=tf.reshape(tf.argmax(logits,axis=-1),[-1])
+        y_actual=tf.reshape(tf.argmax(label_y,axis=-1),[-1])
         accuracy=tf.cast(tf.equal(y_pred,y_actual),tf.float32,name='accu')
 
         dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=label_y)
@@ -222,7 +223,7 @@ class WarmupModel(ModelDesc):
             loss += tf.contrib.layers.apply_regularization(self.regularizer,
                                                            tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
         loss = tf.identity(loss, name='total_loss')
-        summary.add_moving_summary(loss,accuracy)
+        summary.add_moving_summary(loss)
         return loss
 
     def optimizer(self):
@@ -303,41 +304,23 @@ class Model(ModelDesc):
             hidden_states = tf.concat((val[0], val[1]), axis=2)
             rnn_output_dim = self.params.rnn_dim * 2
 
-        # word attention
-        # with tf.variable_scope('word_attention') as scope:
-        #     word_query = tf.get_variable('word_query', [rnn_output_dim, 1],
-        #                                  initializer=tf.contrib.layers.xavier_initializer())
-        #     sent_repre = tf.reshape(
-        #         tf.matmul(
-        #             tf.reshape(
-        #                 tf.nn.softmax(
-        #                     tf.reshape(
-        #                         tf.matmul(
-        #                             tf.reshape(tf.tanh(hidden_states),
-        #                                        [total_sents * seq_len, rnn_output_dim]),
-        #                             word_query
-        #                         ), [total_sents, seq_len]
-        #                     )
-        #                 ), [total_sents, 1, seq_len]
-        #             ), hidden_states
-        #         ), [total_sents, rnn_output_dim]
-        #     )
+
 
         with tf.variable_scope('dep_predictions'):
             # Projection 考虑现在hidden states是多个句子的串联，用cnn
-            arc_dep_hidden = FullyConnected(hidden_states, self.params.projection_size, name='arc_dep_hidden')
-            arc_head_hidden = FullyConnected(hidden_states, self.params.projection_size, name='arc_head_hidden')
+            arc_dep_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_dep_hidden')
+            arc_head_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_head_hidden')
 
             # activation
-            arc_dep_hidden = BNReLU(arc_dep_hidden)
-            arc_head_hidden = BNReLU(arc_head_hidden)
+            arc_dep_hidden = tf.nn.relu(arc_dep_hidden)
+            arc_head_hidden = tf.nn.relu(arc_head_hidden)
 
             # dropout
             arc_dep_hidden = Dropout(arc_dep_hidden, keep_prob=dropout)
             arc_head_hidden = Dropout(arc_head_hidden, keep_prob=dropout)
 
             # bilinear classifier excluding the final dot product
-            arc_head = FullyConnected(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
+            arc_head = tf.layers.dense(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
             W = tf.get_variable('shared_W', shape=[self.params.projection_size, 1,
                                                    self.params.depparse_projection_size])
             arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
@@ -369,19 +352,38 @@ class Model(ModelDesc):
         dep_attention = tf.nn.softmax(arc_scores)
 
         with tf.variable_scope('gcn_encoder') as scope:
-            denom=tf.expand_dims(dep_attention.sum(2),axis=2)+1
+            denom=tf.expand_dims(tf.reduce_sum(dep_attention,axis=2),axis=2)+1
             for l in range(self.gcn_layers):
                 Ax=tf.matmul(dep_attention,hidden_states)
-                AxW=FullyConnected(Ax, self.params.gcn_dim)
-                AxW=AxW + FullyConnected(hidden_states, self.params.gcn_dim)
+                AxW=tf.layers.dense(Ax, self.params.gcn_dim)
+                AxW=AxW + tf.layers.dense(hidden_states, self.params.gcn_dim)
                 AxW=AxW/denom
-                gAxW=BNReLU(AxW)
+                gAxW=tf.nn.relu(AxW)
                 hidden_states=Dropout(gAxW,keep_prob=0.5) if l<self.gcn_layers-1 else gAxW
 
 
         de_out_dim = self.params.gcn_dim
-        sent_repre=tf.reshape(hidden_states,[total_sents,seq_len*self.params.gcn_dim])
-
+        # sent_repre=tf.reshape(hidden_states,[total_sents,seq_len*self.params.gcn_dim])
+        # de_out_dim=tf.shape(sent_repre)[1]
+        # word attention
+        with tf.variable_scope('word_attention') as scope:
+            word_query = tf.get_variable('word_query', [de_out_dim, 1],
+                                         initializer=tf.contrib.layers.xavier_initializer())
+            sent_repre = tf.reshape(
+                tf.matmul(
+                    tf.reshape(
+                        tf.nn.softmax(
+                            tf.reshape(
+                                tf.matmul(
+                                    tf.reshape(tf.tanh(hidden_states),
+                                               [total_sents * seq_len, de_out_dim]),
+                                    word_query
+                                ), [total_sents, seq_len]
+                            )
+                        ), [total_sents, 1, seq_len]
+                    ), hidden_states
+                ), [total_sents, de_out_dim]
+            )
         # 包的表示
 
         with tf.variable_scope('sentence_attention') as scope:
@@ -452,13 +454,13 @@ def get_config(ds_train, ds_test, params):
             HumanHyperParamSetter('learning_rate'),
             PeriodicTrigger(
             InferenceRunner(ds_test, [ScalarStats('total_loss'),ClassificationError('accu','accuracy')]),
-            every_k_epochs=2),
+            every_k_epochs=1),
             MovingAverageSummary(),
             MergeAllSummaries(),
             GPUUtilizationTracker(),
             GPUMemoryTracker()
         ],
-        # steps_per_epoch=60,
+        # steps_per_epoch=10,
         model=WarmupModel(params),
         max_epoch=4,
     )
@@ -467,7 +469,7 @@ def resume_train(ds_train, ds_test, params):
     return AutoResumeTrainConfig(
         always_resume=False,
         data=QueueInput(ds_train),
-        session_init=get_model_loader('./train_log/dr4/{}'.format(params.model)),
+        session_init=get_model_loader('./train_log/dr5/{}'.format(params.model)),
         starting_epoch=params.start_epoch,
         callbacks=[
             ModelSaver(),
