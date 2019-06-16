@@ -235,10 +235,6 @@ class Model(ModelDesc):
     def __init__(self, params):
         self.params = params
         self.regularizer = tf.contrib.layers.l2_regularizer(scale=self.params.l2)
-
-        self.load_data()
-
-    def load_data(self):
         data = pickle.load(open(self.params.dataset, 'rb'))
 
         self.voc2id = data['voc2id']
@@ -324,58 +320,50 @@ class Model(ModelDesc):
                 ), [total_sents, rnn_output_dim]
             )
 
-        # with tf.variable_scope('dep_predictions'):
-        #     # Projection 考虑现在hidden states是多个句子的串联，用cnn
-        #     # arc_dep_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_dep_hidden')
-        #     # arc_head_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_head_hidden')
-        #     arc_dep_hidden=Conv2D('ard_dep_hidden',hidden_states,filters=self.params.projection_size,kernel_size=3,strides=1)
-        #     arc_head_hidden=Conv2D('ard_head_hidden',hidden_states,filters=self.params.projection_size,kernel_size=3,strides=1)
+        with tf.variable_scope('dep_predictions'):
+            # Projection 考虑现在hidden states是多个句子的串联，用cnn
+            arc_dep_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_dep_hidden')
+            arc_head_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_head_hidden')
 
-        #     # pooling
-        #     arc_dep_hidden=tf.reduce_max(arc_dep_hidden,axis=-2)
-        #     arc_head_hidden=tf.reduce_max(arc_head_hidden,axis=-2)
+            # activation
+            arc_dep_hidden = tf.nn.relu(arc_dep_hidden)
+            arc_head_hidden = tf.nn.relu(arc_head_hidden)
 
-        #     # activation
-        #     arc_dep_hidden = tf.nn.relu(arc_dep_hidden)
-        #     arc_head_hidden = tf.nn.relu(arc_head_hidden)
+            # dropout
+            arc_dep_hidden = tf.nn.dropout(arc_dep_hidden, dropout)
+            arc_head_hidden = tf.nn.dropout(arc_head_hidden, dropout)
 
-        #     # dropout
-        #     arc_dep_hidden = tf.nn.dropout(arc_dep_hidden, dropout)
-        #     arc_head_hidden = tf.nn.dropout(arc_head_hidden, dropout)
+            # bilinear classifier excluding the final dot product
+            arc_head = tf.layers.dense(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
+            W = tf.get_variable('shared_W', shape=[self.params.projection_size, 1,
+                                                   self.params.depparse_projection_size])
+            arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
+            shape = tf.shape(arc_dep)
+            arc_dep = tf.reshape(arc_dep, [shape[0], -1, self.params.depparse_projection_size])
 
-        #     # bilinear classifier excluding the final dot product
-        #     arc_head = tf.layers.dense(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
-        #     W = tf.get_variable('shared_W', shape=[self.params.projection_size, self.num_dep_class,
-        #                                            self.params.depparse_projection_size])
-        #     Wr = tf.get_variable('relation_specific_W',
-        #                          shape=[self.params.projection_size, self.params.depparse_projection_size])
-        #     Wr_proj = tf.tile(tf.expand_dims(Wr, axis=-2), [1, self.num_dep_class, 1])
-        #     W += Wr_proj
-        #     arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
-        #     shape = tf.shape(arc_dep)
-        #     arc_dep = tf.reshape(arc_dep, [shape[0], -1, self.params.depparse_projection_size])
+            # apply the transformer trick to prevent dot products from getting too large
+            scale = np.power(self.params.depparse_projection_size, 0.25).astype('float32')
+            scale = tf.get_variable('scale', initializer=scale, dtype=tf.float32)
+            arc_dep /= scale
+            arc_head /= scale
 
-        #     # apply the transformer trick to prevent dot products from getting too large
-        #     scale = np.power(self.params.depparse_projection_size, 0.25).astype('float32')
-        #     scale = tf.get_variable('scale', initializer=scale, dtype=tf.float32)
-        #     arc_dep /= scale
-        #     arc_head /= scale
+            # compute the scores for each candidate arc
+            word_score = tf.matmul(arc_head, arc_dep, transpose_b=True)
+            arc_scores = word_score
 
-        #     # compute the scores for each candidate arc
-        #     word_score = tf.matmul(arc_head, arc_dep, transpose_b=True)
-        #     root_score = tf.layers.dense(arc_head, self.num_dep_class, name='root_score')
-        #     arc_scores = tf.concat([word_score, root_score], axis=-1)
+            # disallow the model from making impossible predictions
+            mask_shape = tf.shape(dep_mask)
+            # dep_mask_ = tf.tile(tf.expand_dims(dep_mask, -1), [1, 1, 1])
+            # dep_mask_ = tf.expand_dims(dep_mask, -1)
+            # dep_mask_ = tf.reshape(dep_mask_, [-1, mask_shape[1]])
 
-        #     # disallow the model from making impossible predictions
-        #     mask_shape = tf.shape(dep_mask)
-        #     dep_mask_ = tf.tile(tf.expand_dims(dep_mask, -1), [1, 1, self.num_dep_class])
-        #     dep_mask_ = tf.reshape(dep_mask_, [-1, mask_shape[1] * self.num_dep_class])
-        #     dep_mask_ = tf.concat(
-        #         [tf.ones((mask_shape[0], 1)), tf.zeros((mask_shape[0], self.num_dep_class - 1)), dep_mask_],
-        #         axis=1)
-        #     dep_mask_ = tf.tile(tf.expand_dims(dep_mask_, 1), [1, mask_shape[1], 1])
-        #     arc_scores += (dep_mask_ - 1) * 100
-        #     nn_dep_out = arc_scores
+            # dep_mask_ = tf.tile(tf.expand_dims(dep_mask_, 1), [1, mask_shape[1], 1])
+            dep_mask_ = tf.tile(tf.expand_dims(dep_mask, 1), [1, mask_shape[1], 1])
+            arc_scores += (dep_mask_ - 1) * 100
+            nn_dep_out = arc_scores
+
+        # accuracy的统计
+        dep_attention = tf.nn.softmax(nn_dep_out)
 
         de_out_dim = rnn_output_dim
 

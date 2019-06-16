@@ -41,20 +41,20 @@ def make_dir(dir_path):
         os.makedirs(dir_path)
 
 
-#创建日志器
-def get_logger(name,log_dir,config_dir):
-    make_dir(log_dir)
-    config_dict=json.load(open(config_dir+'log_config.json'))
-    config_dict['handlers']['file_handler']['filename']=log_dir+name.replace('/','-')
-    logging.config.dictConfig(config_dict)
-    logger=logging.getLogger(name)
-
-    std_out_format='%(asctime)s-[%(levelname)s]-%(message)s'
-    consoleHandler=logging.StreamHandler(sys.stdout)
-    consoleHandler.setFormatter(logging.Formatter(std_out_format))
-    logger.addHandler(consoleHandler)
-
-    return logger
+# #创建日志器
+# def get_logger(name,log_dir,config_dir):
+#     make_dir(log_dir)
+#     config_dict=json.load(open(config_dir+'log_config.json'))
+#     config_dict['handlers']['file_handler']['filename']=log_dir+name.replace('/','-')
+#     logging.config.dictConfig(config_dict)
+#     logger=logging.getLogger(name)
+#
+#     std_out_format='%(asctime)s-[%(levelname)s]-%(message)s'
+#     consoleHandler=logging.StreamHandler(sys.stdout)
+#     consoleHandler.setFormatter(logging.Formatter(std_out_format))
+#     logger.addHandler(consoleHandler)
+#
+#     return logger
 
 #将输入列表分段为相同长度的多个列表
 def getChunks(inp_list,chunk_size):
