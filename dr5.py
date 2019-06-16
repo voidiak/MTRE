@@ -167,19 +167,19 @@ class WarmupModel(ModelDesc):
 
         with tf.variable_scope('dep_predictions'):
             # Projection 考虑现在hidden states是多个句子的串联，用cnn
-            arc_dep_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_dep_hidden')
-            arc_head_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_head_hidden')
+            arc_dep_hidden = FullyConnected(hidden_states, self.params.projection_size, name='arc_dep_hidden')
+            arc_head_hidden = FullyConnected(hidden_states, self.params.projection_size, name='arc_head_hidden')
 
             # activation
-            arc_dep_hidden = tf.nn.relu(arc_dep_hidden)
-            arc_head_hidden = tf.nn.relu(arc_head_hidden)
+            arc_dep_hidden = BNReLU(arc_dep_hidden)
+            arc_head_hidden = BNReLU(arc_head_hidden)
 
             # dropout
-            arc_dep_hidden = tf.nn.dropout(arc_dep_hidden, dropout)
-            arc_head_hidden = tf.nn.dropout(arc_head_hidden, dropout)
+            arc_dep_hidden = Dropout(arc_dep_hidden, keep_prob=dropout)
+            arc_head_hidden = Dropout(arc_head_hidden, keep_prob=dropout)
 
             # bilinear classifier excluding the final dot product
-            arc_head = tf.layers.dense(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
+            arc_head = FullyConnected(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
             W = tf.get_variable('shared_W', shape=[self.params.projection_size, 1,
                                                    self.params.depparse_projection_size])
             arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
@@ -250,6 +250,9 @@ class Model(ModelDesc):
         self.word_list.sort(key=lambda x: x[1])
         self.word_list, _ = zip(*self.word_list)
 
+        #gcn encoding
+        self.gcn_layers=2
+
     def inputs(self):
         return [tf.TensorSpec([None, None], tf.int32, 'input_x'),  # Xs
                 tf.TensorSpec([None, None], tf.int32, 'input_pos1'),  # Pos1s
@@ -301,40 +304,40 @@ class Model(ModelDesc):
             rnn_output_dim = self.params.rnn_dim * 2
 
         # word attention
-        with tf.variable_scope('word_attention') as scope:
-            word_query = tf.get_variable('word_query', [rnn_output_dim, 1],
-                                         initializer=tf.contrib.layers.xavier_initializer())
-            sent_repre = tf.reshape(
-                tf.matmul(
-                    tf.reshape(
-                        tf.nn.softmax(
-                            tf.reshape(
-                                tf.matmul(
-                                    tf.reshape(tf.tanh(hidden_states),
-                                               [total_sents * seq_len, rnn_output_dim]),
-                                    word_query
-                                ), [total_sents, seq_len]
-                            )
-                        ), [total_sents, 1, seq_len]
-                    ), hidden_states
-                ), [total_sents, rnn_output_dim]
-            )
+        # with tf.variable_scope('word_attention') as scope:
+        #     word_query = tf.get_variable('word_query', [rnn_output_dim, 1],
+        #                                  initializer=tf.contrib.layers.xavier_initializer())
+        #     sent_repre = tf.reshape(
+        #         tf.matmul(
+        #             tf.reshape(
+        #                 tf.nn.softmax(
+        #                     tf.reshape(
+        #                         tf.matmul(
+        #                             tf.reshape(tf.tanh(hidden_states),
+        #                                        [total_sents * seq_len, rnn_output_dim]),
+        #                             word_query
+        #                         ), [total_sents, seq_len]
+        #                     )
+        #                 ), [total_sents, 1, seq_len]
+        #             ), hidden_states
+        #         ), [total_sents, rnn_output_dim]
+        #     )
 
         with tf.variable_scope('dep_predictions'):
             # Projection 考虑现在hidden states是多个句子的串联，用cnn
-            arc_dep_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_dep_hidden')
-            arc_head_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_head_hidden')
+            arc_dep_hidden = FullyConnected(hidden_states, self.params.projection_size, name='arc_dep_hidden')
+            arc_head_hidden = FullyConnected(hidden_states, self.params.projection_size, name='arc_head_hidden')
 
             # activation
-            arc_dep_hidden = tf.nn.relu(arc_dep_hidden)
-            arc_head_hidden = tf.nn.relu(arc_head_hidden)
+            arc_dep_hidden = BNReLU(arc_dep_hidden)
+            arc_head_hidden = BNReLU(arc_head_hidden)
 
             # dropout
-            arc_dep_hidden = tf.nn.dropout(arc_dep_hidden, dropout)
-            arc_head_hidden = tf.nn.dropout(arc_head_hidden, dropout)
+            arc_dep_hidden = Dropout(arc_dep_hidden, keep_prob=dropout)
+            arc_head_hidden = Dropout(arc_head_hidden, keep_prob=dropout)
 
             # bilinear classifier excluding the final dot product
-            arc_head = tf.layers.dense(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
+            arc_head = FullyConnected(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
             W = tf.get_variable('shared_W', shape=[self.params.projection_size, 1,
                                                    self.params.depparse_projection_size])
             arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
@@ -352,20 +355,32 @@ class Model(ModelDesc):
             arc_scores = word_score
 
             # disallow the model from making impossible predictions
-            mask_shape = tf.shape(dep_mask)
-            # dep_mask_ = tf.tile(tf.expand_dims(dep_mask, -1), [1, 1, 1])
-            # dep_mask_ = tf.expand_dims(dep_mask, -1)
-            # dep_mask_ = tf.reshape(dep_mask_, [-1, mask_shape[1]])
+            # mask_shape = tf.shape(dep_mask)
+            # # dep_mask_ = tf.tile(tf.expand_dims(dep_mask, -1), [1, 1, 1])
+            # # dep_mask_ = tf.expand_dims(dep_mask, -1)
+            # # dep_mask_ = tf.reshape(dep_mask_, [-1, mask_shape[1]])
+            #
+            # # dep_mask_ = tf.tile(tf.expand_dims(dep_mask_, 1), [1, mask_shape[1], 1])
+            # dep_mask_ = tf.tile(tf.expand_dims(dep_mask, 1), [1, mask_shape[1], 1])
+            # arc_scores += (dep_mask_ - 1) * 100
 
-            # dep_mask_ = tf.tile(tf.expand_dims(dep_mask_, 1), [1, mask_shape[1], 1])
-            dep_mask_ = tf.tile(tf.expand_dims(dep_mask, 1), [1, mask_shape[1], 1])
-            arc_scores += (dep_mask_ - 1) * 100
-            nn_dep_out = arc_scores
 
-        # accuracy的统计
-        dep_attention = tf.nn.softmax(nn_dep_out)
+        # gcn encoding dependency tree structure
+        dep_attention = tf.nn.softmax(arc_scores)
 
-        de_out_dim = rnn_output_dim
+        with tf.variable_scope('gcn_encoder') as scope:
+            denom=tf.expand_dims(dep_attention.sum(2),axis=2)+1
+            for l in range(self.gcn_layers):
+                Ax=tf.matmul(dep_attention,hidden_states)
+                AxW=FullyConnected(Ax, self.params.gcn_dim)
+                AxW=AxW + FullyConnected(hidden_states, self.params.gcn_dim)
+                AxW=AxW/denom
+                gAxW=BNReLU(AxW)
+                hidden_states=Dropout(gAxW,keep_prob=0.5) if l<self.gcn_layers-1 else gAxW
+
+
+        de_out_dim = self.params.gcn_dim
+        sent_repre=tf.reshape(hidden_states,[total_sents,seq_len*self.params.gcn_dim])
 
         # 包的表示
 
@@ -518,8 +533,8 @@ if __name__ == '__main__':
     parser.add_argument('-only_eval', dest='only_eval', action='store_true',
                         help='Only evaluate pretrained model(skip training')
     parser.add_argument('-seed', dest='seed', default=1234, type=int, help='seed for randomization')
-    parser.add_argument('-rnn_dim', dest='rnn_dim', default=192, type=int, help='hidden state dimension of Bi-RNN')
-
+    parser.add_argument('-rnn_dim', dest='rnn_dim', default=200, type=int, help='hidden state dimension of Bi-RNN')
+    parser.add_argument('-gcn_dim', dest='gcn_dim', default=200, type=int, help='hidden state dimension of GCN')
     parser.add_argument('-projection_size', dest='projection_size', default=128, type=int,
                         help='projection size for LSTMs and hidden layers')
     parser.add_argument('-depparse_projection_size', dest='depparse_projection_size', default=64, type=int,
