@@ -213,7 +213,7 @@ class Model(ModelDesc):
         logits = tf.nn.softmax(re_out,name='logits')
         y_pred = tf.argmax(logits, axis=1,name='pred_y')
         y_actual = tf.argmax(input_y, axis=1)
-        accuracy = tf.reduce_mean(tf.cast(tf.equal(y_pred, y_actual), tf.float32),name='accuracy')
+        accuracy = tf.cast(tf.equal(y_pred, y_actual), tf.float32,name='accu')
         re_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=re_out, labels=input_y))#
         # tf.losses.add_loss(re_loss)
         loss = re_loss
@@ -223,7 +223,7 @@ class Model(ModelDesc):
         # loss=tf.losses.get_total_loss(add_regularization_losses=False,name='total_loss')
         # summary.add_moving_summary(loss)
         loss=tf.identity(loss,name='total_loss')
-        summary.add_moving_summary(loss,accuracy)
+        summary.add_moving_summary(loss)
         return loss
 
     def optimizer(self):
@@ -253,7 +253,7 @@ def get_config(ds_train, ds_test, params):
             StatMonitorParamSetter('learning_rate', 'total_loss',
                                    lambda x: x * 0.2, 0, 5),
             PeriodicTrigger(
-                InferenceRunner(ds_test, [ScalarStats('total_loss')]),
+                InferenceRunner(ds_test, [ScalarStats('total_loss'),ClassificationError('accu','accuracy')]),
                 every_k_epochs=1),
             MovingAverageSummary(),
             MergeAllSummaries(),

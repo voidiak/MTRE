@@ -214,6 +214,7 @@ class WarmupModel(ModelDesc):
         logits=tf.nn.softmax(nn_dep_out)
         y_pred=tf.reshape(tf.argmax(logits,axis=-1),[-1])
         y_actual=tf.reshape(tf.argmax(label_y,axis=-1),[-1])
+        y_mask=tf.reshape(dep_mask,[-1])
         accuracy=tf.cast(tf.equal(y_pred,y_actual),tf.float32,name='accu')
 
         dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=label_y)
@@ -349,18 +350,18 @@ class Model(ModelDesc):
 
 
         # gcn encoding dependency tree structure
-        dep_attention = tf.nn.softmax(arc_scores)
+        dep_matrix = tf.nn.softmax(arc_scores)
 
         with tf.variable_scope('gcn_encoder') as scope:
-            denom=tf.expand_dims(tf.reduce_sum(dep_attention,axis=2),axis=2)+1
+            denom=tf.expand_dims(tf.reduce_sum(dep_matrix,axis=2),axis=2)+1
+            gcn_mask=tf.expand_dims(tf.equal((tf.reduce_sum(dep_matrix,axis=2)+tf.reduce_sum(dep_matrix,axis=1)),0),axis=2)
             for l in range(self.gcn_layers):
-                Ax=tf.matmul(dep_attention,hidden_states)
+                Ax=tf.matmul(dep_matrix,hidden_states)
                 AxW=tf.layers.dense(Ax, self.params.gcn_dim)
                 AxW=AxW + tf.layers.dense(hidden_states, self.params.gcn_dim)
                 AxW=AxW/denom
                 gAxW=tf.nn.relu(AxW)
                 hidden_states=Dropout(gAxW,keep_prob=0.5) if l<self.gcn_layers-1 else gAxW
-
 
         de_out_dim = self.params.gcn_dim
         # sent_repre=tf.reshape(hidden_states,[total_sents,seq_len*self.params.gcn_dim])
@@ -469,7 +470,7 @@ def resume_train(ds_train, ds_test, params):
     return AutoResumeTrainConfig(
         always_resume=False,
         data=QueueInput(ds_train),
-        session_init=get_model_loader('./train_log/dr5/model-{}'.format(params.model)),
+        session_init=get_model_loader('./train_log/dr6/model-{}'.format(params.model)),
         starting_epoch=params.start_epoch,
         callbacks=[
             ModelSaver(),
@@ -583,12 +584,12 @@ if __name__ == '__main__':
         launch_train_with_config(resume_config, SimpleTrainer())
 
     elif args.command == 'predict':
-        with open('./train_log/dr5/dr5pn_{}_{}.txt'.format(args.model,args.epochs), 'w', encoding='utf-8')as f:
+        with open('./train_log/dr6/dr5pn_{}_{}.txt'.format(args.model,args.epochs), 'w', encoding='utf-8')as f:
 
             for model in [str(args.model + i * 4580) for i in range(args.epochs)]:
                 f.write(model + '\t')
                 for pnpath in ['./mdb/pn1.mdb', './mdb/pn2.mdb', './mdb/pn3.mdb']:
-                    p100, p200, p300 = predict(Model(args), os.path.join('./train_log/dr5/', 'model-' + model), pnpath)
+                    p100, p200, p300 = predict(Model(args), os.path.join('./train_log/dr6/', 'model-' + model), pnpath)
                     logger.info('    {}:P@100:{}  P@200:{}  P@300:{}\n'.format(pnpath, p100, p200, p300))
                     line = "{}\t{}\t{}\t".format(p100, p200, p300)
                     f.write(line)
