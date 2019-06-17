@@ -63,7 +63,7 @@ class getbatch(ProxyDataFlow):
             for rel in e:
                 temp[i, rel] = 1
         return temp
-
+    #To-Do:move padding to graph
     def pad_dynamic(self, X, pos1, pos2, dep_mask, dep):
         # 为每个batch中的句子补位
         seq_len = 0
@@ -210,12 +210,14 @@ class WarmupModel(ModelDesc):
 
         label_y = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
 
-        # accuracy的统计
+        # To-Do:accuracy的统计
         logits=tf.nn.softmax(nn_dep_out)
         y_pred=tf.reshape(tf.argmax(logits,axis=-1),[-1])
         y_actual=tf.reshape(tf.argmax(label_y,axis=-1),[-1])
-        y_mask=tf.reshape(dep_mask,[-1])
-        accuracy=tf.cast(tf.equal(y_pred,y_actual),tf.float32,name='accu')
+        y_mask=tf.cast(tf.reshape(dep_mask,[-1]),dtype=tf.bool)
+        pred_masked=tf.boolean_mask(y_pred,y_mask)
+        actual_masked=tf.boolean_mask(y_actual,y_mask)
+        accuracy=tf.cast(tf.equal(pred_masked,actual_masked),tf.float32,name='accu')
 
         dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=label_y)
         dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
