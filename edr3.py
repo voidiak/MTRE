@@ -96,17 +96,21 @@ class getbatch(ProxyDataFlow):
         return temp, mask
 
 
-class WarmupModel(ModelDesc):
+class NERModel(ModelDesc):
     def __init__(self, params):
         self.params = params
-        self.regularizer = tf.contrib.layers.l2_regularizer(scale=self.params.l2)
+
+        if self.params.l2 == 0.0:
+            self.regularizer = None
+        else:
+            self.regularizer = tf.contrib.layers.l2_regularizer(scale=self.params.l2)
+
         self.load_data()
 
     def load_data(self):
         data = pickle.load(open(self.params.dataset, 'rb'))
 
         self.voc2id = data['voc2id']
-        self.dep2id = data['dep2id']
         self.id2voc = data['id2voc']
         self.max_pos = data['max_pos']
         self.num_class = len(data['rel2id'])
@@ -117,6 +121,8 @@ class WarmupModel(ModelDesc):
         self.word_list = list(self.voc2id.items())
         self.word_list.sort(key=lambda x: x[1])
         self.word_list, _ = zip(*self.word_list)
+
+
 
     def inputs(self):
         return [tf.TensorSpec([None, None], tf.int32, 'input_x'),  # Xs
@@ -138,14 +144,14 @@ class WarmupModel(ModelDesc):
                 tf.TensorSpec((), tf.float32, 'dropout')
                 ]
 
-    def build_graph(self, input_x, input_pos1, input_pos2, head_pos, tail_pos, dep_mask, x_len, seq_len, total_sents, \
+    def build_graph(self, input_x, input_pos1, input_pos2, head_pos, tail_pos, dep_mask,  x_len, seq_len, total_sents,\
                     total_bags, sent_num, input_y, dep_y, head_label, tail_label, rec_dropout, dropout):
         with tf.variable_scope('word_embedding') as scope:
             model = gensim.models.KeyedVectors.load_word2vec_format(self.params.embed_loc, binary=False)
             embed_init = getEmbeddings(model, self.word_list, self.params.word_embed_dim)
             _word_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable=True,
                                                regularizer=self.regularizer)
-            word_pad = tf.zeros([1, self.params.word_embed_dim])  # word embedding for 'UNK'
+            word_pad = tf.zeros([1, self.params.word_embed_dim])#word embedding for 'UNK'
             word_embeddings = tf.concat([word_pad, _word_embeddings], axis=0)
 
             pos1_embeddings = tf.get_variable('pos1_embeddings', [self.max_pos, self.params.pos_dim],
@@ -171,6 +177,26 @@ class WarmupModel(ModelDesc):
             hidden_states = tf.concat((val[0], val[1]), axis=2)
             rnn_output_dim = self.params.rnn_dim * 2
 
+        # word attention
+        # with tf.variable_scope('word_attention') as scope:
+        #     word_query = tf.get_variable('word_query', [rnn_output_dim, 1],
+        #                                  initializer=tf.contrib.layers.xavier_initializer())
+        #     sent_repre = tf.reshape(
+        #         tf.matmul(
+        #             tf.reshape(
+        #                 tf.nn.softmax(
+        #                     tf.reshape(
+        #                         tf.matmul(
+        #                             tf.reshape(tf.tanh(hidden_states),
+        #                                        [total_sents * seq_len, rnn_output_dim]),
+        #                             word_query
+        #                         ), [total_sents, seq_len]
+        #                     )
+        #                 ), [total_sents, 1, seq_len]
+        #             ), hidden_states
+        #         ), [total_sents, rnn_output_dim]
+        #     )
+        # add entity type classification
         with tf.variable_scope('entity_type_classification'):
             entity_query = tf.get_variable('head_query', [rnn_output_dim, 1],
                                            initializer=tf.contrib.layers.xavier_initializer())
@@ -180,8 +206,8 @@ class WarmupModel(ModelDesc):
                 [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(head_pos, [total_sents, 1])], axis=-1)
             tail_index = tf.concat(
                 [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(tail_pos, [total_sents, 1])], axis=-1)
-            # add null word vector
-            word_hidden_states = tf.concat([tf.zeros([total_sents, 1, rnn_output_dim]), hidden_states], axis=1)
+            #add null word vector
+            word_hidden_states=tf.concat([tf.zeros([total_sents,1, rnn_output_dim]),hidden_states],axis=1)
             # extract head/tail entity's hidden state. size (total_sents,hidden_dim)
             head_repre_s = tf.gather_nd(word_hidden_states, head_index, name='head_entity_h_in_sentence')
             tail_repre_s = tf.gather_nd(word_hidden_states, tail_index, name='tail_entity_h_in_sentence')
@@ -219,8 +245,9 @@ class WarmupModel(ModelDesc):
                 return tail_repre_
 
             # 一个batch中实体的向量表示
-            head_repre_b = tf.map_fn(getHeadRepre, sent_num, dtype=tf.float32)  # dimension(batchsize,rnn_output_dim)
+            head_repre_b = tf.map_fn(getHeadRepre, sent_num, dtype=tf.float32)#dimension(batchsize,rnn_output_dim)
             tail_repre_b = tf.map_fn(getTailRepre, sent_num, dtype=tf.float32)
+
 
         with tf.variable_scope('entity_fully_connected_layer') as scope:
             w_e = tf.get_variable('w', [rnn_output_dim, self.num_entity_class],
@@ -230,6 +257,146 @@ class WarmupModel(ModelDesc):
                                   regularizer=self.regularizer)
             hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
             tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
+
+        # de_out_dim = rnn_output_dim
+
+        # 包的表示
+
+        # with tf.variable_scope('sentence_attention') as scope:
+        #     sentence_query = tf.get_variable('sentence_query', [de_out_dim, 1],
+        #                                      initializer=tf.contrib.layers.xavier_initializer())
+
+        #     def getSentenceAtt(num):
+        #         num_sents = num[1] - num[0]
+        #         bag_sents = sent_repre[num[0]:num[1]]
+
+        #         sentence_att_weights = tf.nn.softmax(
+        #             tf.reshape(tf.matmul(tf.tanh(bag_sents), sentence_query), [num_sents]))
+
+        #         bag_repre_ = tf.reshape(
+        #             tf.matmul(
+        #                 tf.reshape(sentence_att_weights, [1, num_sents]),
+        #                 bag_sents
+        #             ), [de_out_dim]
+        #         )
+        #         return bag_repre_
+
+        #     bag_repre = tf.map_fn(getSentenceAtt, sent_num, dtype=tf.float32)
+
+        # with tf.variable_scope('fully_connected_layer') as scope:
+        #     w = tf.get_variable('w', [de_out_dim, self.num_class], initializer=tf.contrib.layers.xavier_initializer(),
+        #                         regularizer=self.regularizer)
+        #     b = tf.get_variable('b', initializer=np.zeros([self.num_class]).astype(np.float32),
+        #                         regularizer=self.regularizer)
+        #     re_out = tf.nn.xw_plus_b(bag_repre, w, b)
+        #     re_out=tf.nn.dropout(re_out,dropout)
+
+        logits = tf.nn.softmax(hr_out)
+        y_pred = tf.argmax(logits, axis=1)
+        y_actual = tf.argmax(head_label, axis=1)
+        # accuracy = tf.reduce_mean(tf.cast(tf.equal(y_pred, y_actual), tf.float32),name='accu')
+        accuracy = tf.cast(tf.equal(y_pred, y_actual), tf.float32,name='accu')
+
+
+        head_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=hr_out,
+                                                                           labels=head_label))  # use sigmoid loss multi-label classification
+        # tf.losses.add_loss(0.25*head_loss)
+        tail_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=tr_out, labels=tail_label))
+        # tf.losses.add_loss(0.25*tail_loss)
+        # re_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=re_out, labels=input_y))
+        # tf.losses.add_loss(re_loss)
+        # c = tf.get_variable('c',initializer=0.5,trainable=True)
+        loss = head_loss + tail_loss
+        if self.regularizer != None:
+            loss+=tf.contrib.layers.apply_regularization(self.regularizer,
+                                                           tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+        # loss=tf.losses.get_total_loss(add_regularization_losses=False,name='total_loss')
+        # summary.add_moving_summary(loss)
+        loss=tf.identity(loss,name='total_loss')
+        summary.add_moving_summary(loss)
+        return loss
+
+    def optimizer(self):
+        lr = tf.get_variable('learning_rate', initializer=0.001, trainable=False)
+        opt = tf.train.AdamOptimizer(lr)
+        return optimizer.apply_grad_processors(
+            opt, [GlobalNormClip(5), SummaryGradient()])
+
+class DPModel(ModelDesc):
+    def __init__(self, params):
+        self.params = params
+        self.regularizer = tf.contrib.layers.l2_regularizer(scale=self.params.l2)
+
+        self.load_data()
+
+    def load_data(self):
+        data = pickle.load(open(self.params.dataset, 'rb'))
+
+        self.voc2id = data['voc2id']
+        self.dep2id = data['dep2id']
+        self.id2voc = data['id2voc']
+        self.max_pos = data['max_pos']
+        self.num_class = len(data['rel2id'])
+        self.num_dep_class = len(data['dep2id'])  # dependency label的数量
+        self.num_deLabel = 1
+
+        # get word list
+        self.word_list = list(self.voc2id.items())
+        self.word_list.sort(key=lambda x: x[1])
+        self.word_list, _ = zip(*self.word_list)
+
+    def inputs(self):
+        return [tf.TensorSpec([None, None], tf.int32, 'input_x'),  # Xs
+                tf.TensorSpec([None, None], tf.int32, 'input_pos1'),  # Pos1s
+                tf.TensorSpec([None, None], tf.int32, 'input_pos2'),  # Pos2s
+                tf.TensorSpec([None], tf.int32, 'head_pos'),  # HeadPoss
+                tf.TensorSpec([None], tf.int32, 'tail_pos'),  # TailPoss
+                tf.TensorSpec([None, None], tf.float32, 'dep_mask'),  # DepMasks
+                tf.TensorSpec([None], tf.int32, 'x_len'),  # X_len
+                tf.TensorSpec((), tf.int32, 'seq_len'),  # max_seq_len
+                tf.TensorSpec((), tf.int32, 'total_sents'),  # total_sents
+                tf.TensorSpec((), tf.int32, 'total_bags'),  # total_bags
+                tf.TensorSpec([None, 3], tf.int32, 'sent_num'),  # SentNum
+                tf.TensorSpec([None, None], tf.int32, 'input_y'),  # ReLabels
+                tf.TensorSpec([None, None], tf.int32, 'dep_y'),  # DepLabels
+                tf.TensorSpec([None, None], tf.float32, 'head_label'),  # HeadLabels
+                tf.TensorSpec([None, None], tf.float32, 'tail_label'),  # TailLabels
+                tf.TensorSpec((), tf.float32, 'rec_dropout'),
+                tf.TensorSpec((), tf.float32, 'dropout')
+                ]
+
+    def build_graph(self, input_x, input_pos1, input_pos2,head_pos, tail_pos, dep_mask, x_len, seq_len, total_sents, \
+                    total_bags, sent_num, input_y, dep_y,head_label, tail_label, rec_dropout, dropout):
+        with tf.variable_scope('word_embedding') as scope:
+            model = gensim.models.KeyedVectors.load_word2vec_format(self.params.embed_loc, binary=False)
+            embed_init = getEmbeddings(model, self.word_list, self.params.word_embed_dim)
+            _word_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable=True,
+                                               regularizer=self.regularizer)
+            word_pad = tf.zeros([1, self.params.word_embed_dim])  # word embedding for 'UNK'
+            word_embeddings = tf.concat([word_pad, _word_embeddings], axis=0)
+
+            pos1_embeddings = tf.get_variable('pos1_embeddings', [self.max_pos, self.params.pos_dim],
+                                              initializer=tf.contrib.layers.xavier_initializer(), trainable=True,
+                                              regularizer=self.regularizer)
+            pos2_embeddings = tf.get_variable('pos2_embeddings', [self.max_pos, self.params.pos_dim],
+                                              initializer=tf.contrib.layers.xavier_initializer(), trainable=True,
+                                              regularizer=self.regularizer)
+
+            word_embeded = tf.nn.embedding_lookup(word_embeddings, input_x)
+            pos1_embeded = tf.nn.embedding_lookup(pos1_embeddings, input_pos1)
+            pos2_embeded = tf.nn.embedding_lookup(pos2_embeddings, input_pos2)
+            embeds = tf.concat([word_embeded, pos1_embeded, pos2_embeded], axis=2)
+
+        with tf.variable_scope('Bi_rnn') as scope:
+            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.params.rnn_dim, name='FW_GRU'),
+                                                    output_keep_prob=rec_dropout)
+            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.params.rnn_dim, name='BW_GRU'),
+                                                    output_keep_prob=rec_dropout)
+            val, state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bk_cell, embeds, sequence_length=x_len,
+                                                         dtype=tf.float32)
+
+            hidden_states = tf.concat((val[0], val[1]), axis=2)
+            rnn_output_dim = self.params.rnn_dim * 2
 
         with tf.variable_scope('dep_predictions'):
             # Projection 考虑现在hidden states是多个句子的串联，用cnn
@@ -265,19 +432,29 @@ class WarmupModel(ModelDesc):
 
             # disallow the model from making impossible predictions
             mask_shape = tf.shape(dep_mask)
+            # dep_mask_ = tf.tile(tf.expand_dims(dep_mask, -1), [1, 1, 1])
+            # dep_mask_ = tf.expand_dims(dep_mask, -1)
+            # dep_mask_ = tf.reshape(dep_mask_, [-1, mask_shape[1]])
+
+            # dep_mask_ = tf.tile(tf.expand_dims(dep_mask_, 1), [1, mask_shape[1], 1])
             dep_mask_ = tf.tile(tf.expand_dims(dep_mask, 1), [1, mask_shape[1], 1])
             arc_scores += (dep_mask_ - 1) * 100
             nn_dep_out = arc_scores
 
         label_y = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
 
-        head_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=hr_out,
-                                                                           labels=head_label))  # use sigmoid loss multi-label classification
-        tail_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=tr_out, labels=tail_label))
+        # To-Do:accuracy的统计
+        logits=tf.nn.softmax(nn_dep_out)
+        y_pred=tf.reshape(tf.argmax(logits,axis=-1),[-1])
+        y_actual=tf.reshape(tf.argmax(label_y,axis=-1),[-1])
+        y_mask=tf.cast(tf.reshape(dep_mask,[-1]),dtype=tf.bool)
+        pred_masked=tf.boolean_mask(y_pred,y_mask)
+        actual_masked=tf.boolean_mask(y_actual,y_mask)
+        accuracy=tf.cast(tf.equal(pred_masked,actual_masked),tf.float32,name='accu')
 
         dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=label_y)
         dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
-        loss = dp_loss + 0.5 * (head_loss + tail_loss)
+        loss = dp_loss
         if self.regularizer != None:
             loss += tf.contrib.layers.apply_regularization(self.regularizer,
                                                            tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
@@ -290,7 +467,6 @@ class WarmupModel(ModelDesc):
         opt = tf.train.AdamOptimizer(lr)
         return optimizer.apply_grad_processors(
             opt, [GlobalNormClip(5), SummaryGradient()])
-
 
 class Model(ModelDesc):
     def __init__(self, params):
@@ -558,7 +734,7 @@ def getdata(path, isTrain):
     return ds
 
 
-def get_config(ds_train, ds_test, params):
+def get_dp_config(ds_train, ds_test, params):
     return TrainConfig(
         data=QueueInput(ds_train),
         callbacks=[
@@ -574,16 +750,38 @@ def get_config(ds_train, ds_test, params):
             GPUUtilizationTracker(),
             GPUMemoryTracker()
         ],
-        model=WarmupModel(params),
+        model=DPModel(params),
         max_epoch=4,
     )
 
+def get_ner_config(ds_train, ds_test, params):
+    return AutoResumeTrainConfig(
+        always_resume=False,
+        data=QueueInput(ds_train),
+        session_init=get_model_loader('./train_log/edr3/model-{}'.format(params.model)),
+        starting_epoch=params.start_epoch,
+        callbacks=[
+            ModelSaver(),
+            StatMonitorParamSetter('learning_rate', 'total_loss',
+                                   lambda x: x * 0.2, 0, 5),
+            HumanHyperParamSetter('learning_rate'),
+            PeriodicTrigger(
+                InferenceRunner(ds_test, [ScalarStats('total_loss')]),
+                every_k_epochs=2),
+            MovingAverageSummary(),
+            MergeAllSummaries(),
+            GPUUtilizationTracker(),
+            GPUMemoryTracker()
+        ],
+        model=NERModel(params),
+        max_epoch=params.start_epoch + params.epochs-1,
+    )
 
 def resume_train(ds_train, ds_test, params):
     return AutoResumeTrainConfig(
         always_resume=False,
         data=QueueInput(ds_train),
-        session_init=get_model_loader('./train_log/edr/model-{}'.format(params.model)),
+        session_init=get_model_loader('./train_log/edr3/model-{}'.format(params.model)),
         starting_epoch=params.start_epoch,
         callbacks=[
             ModelSaver(),
@@ -599,7 +797,7 @@ def resume_train(ds_train, ds_test, params):
             GPUMemoryTracker()
         ],
         model=Model(params),
-        max_epoch=params.start_epoch + params.epochs,
+        max_epoch=params.start_epoch + params.epochs-1,
     )
 
 
@@ -658,12 +856,18 @@ if __name__ == '__main__':
 
     subparsers = parser.add_subparsers(title='command', dest='command')
 
-    parser_train = subparsers.add_parser('train')
+    parser_train = subparsers.add_parser('train_dp')
     parser_train.add_argument('-name', dest='name', required=True, help='name of the run')
 
     parser_predict = subparsers.add_parser('predict')
     parser_predict.add_argument('-model', dest='model', required=True, type=int, help='model for prediction')
     parser_predict.add_argument('-epochs', dest='epochs', required=True, type=int, help='epochs to predict')
+
+    parser_resume = subparsers.add_parser('train_ner')
+    parser_resume.add_argument('-model', dest='model', required=True, type=int, help='name of the previous model')
+    parser_resume.add_argument('-start_epoch', dest='start_epoch', required=True, type=int,
+                               help='number of the starting epoch')
+    parser_resume.add_argument('-epochs', dest='epochs', required=True, type=int, help='epochs to train for')
 
     parser_resume = subparsers.add_parser('resume')
     parser_resume.add_argument('-model', dest='model', required=True, type=int, help='name of the previous model')
@@ -673,7 +877,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     set_gpu(args.gpu)
-    if args.command == 'train':
+    if args.command == 'train_dp':
 
         # set seed
         tf.set_random_seed(args.seed)
@@ -685,8 +889,17 @@ if __name__ == '__main__':
         ds = getdata('./mdb/train.mdb', True)
 
         dss = getdata('./mdb/test.mdb', False)
-        config = get_config(ds, dss, args)
-        launch_train_with_config(config, SimpleTrainer())
+        dp_config = get_dp_config(ds, dss, args)
+        launch_train_with_config(dp_config, SimpleTrainer())
+
+    elif args.command == 'train_ner':
+        logger.auto_set_dir(action='k')
+
+        ds = getdata('./mdb/train.mdb', True)
+
+        dss = getdata('./mdb/test.mdb', False)
+        ner_config = get_ner_config(ds, dss, args)
+        launch_train_with_config(ner_config, SimpleTrainer())
 
     elif args.command == 'resume':
         logger.auto_set_dir(action='k')
@@ -698,12 +911,12 @@ if __name__ == '__main__':
         launch_train_with_config(resume_config, SimpleTrainer())
 
     elif args.command == 'predict':
-        with open('./train_log/edr/edrpn_{}_{}.txt'.format(args.model, args.epochs), 'w', encoding='utf-8')as f:
+        with open('./train_log/edr3/edrpn_{}_{}.txt'.format(args.model, args.epochs), 'w', encoding='utf-8')as f:
 
             for model in [str(args.model + i * 4580) for i in range(args.epochs)]:
                 f.write(model + '\t')
                 for pnpath in ['./mdb/pn1.mdb', './mdb/pn2.mdb', './mdb/pn3.mdb']:
-                    p100, p200, p300 = predict(Model(args), os.path.join('./train_log/edr/', 'model-' + model), pnpath)
+                    p100, p200, p300 = predict(Model(args), os.path.join('./train_log/edr3/', 'model-' + model), pnpath)
                     logger.info('    {}:P@100:{}  P@200:{}  P@300:{}\n'.format(pnpath, p100, p200, p300))
                     line = "{}\t{}\t{}\t".format(p100, p200, p300)
                     f.write(line)

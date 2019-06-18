@@ -45,7 +45,6 @@ class getbatch(ProxyDataFlow):
                                                                                          DepLabels)
             Xs = np.array(Xs)
             ReLabels = self.getKHot(Y, 53)
-            # DepLabels=np.eye((1 + max_seq_len) * 41)[np.array(DepLabels)]
             total_sents = num
             total_bags = len(Y)
             if not self.isTrain:

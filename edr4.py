@@ -173,7 +173,7 @@ class WarmupModel(ModelDesc):
 
         with tf.variable_scope('entity_type_classification'):
             entity_query = tf.get_variable('head_query', [rnn_output_dim, 1],
-                                           initializer=tf.contrib.layers.xavier_initializer())
+                                           initializer=tf.contrib.layers.xavier_initializer(),regularizer=self.regularizer)
             # 以句子中的词index建立索引
             s_idx = tf.range(0, total_sents, 1, dtype=tf.int32)
             head_index = tf.concat(
@@ -248,7 +248,8 @@ class WarmupModel(ModelDesc):
             # bilinear classifier excluding the final dot product
             arc_head = tf.layers.dense(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
             W = tf.get_variable('shared_W', shape=[self.params.projection_size, 1,
-                                                   self.params.depparse_projection_size])
+                                                   self.params.depparse_projection_size],
+                                initializer=tf.contrib.layers.xavier_initializer(), regularizer=self.regularizer)
             arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
             shape = tf.shape(arc_dep)
             arc_dep = tf.reshape(arc_dep, [shape[0], -1, self.params.depparse_projection_size])
@@ -319,7 +320,7 @@ class Model(ModelDesc):
         self.word_list = list(self.voc2id.items())
         self.word_list.sort(key=lambda x: x[1])
         self.word_list, _ = zip(*self.word_list)
-        self.gcn_layers=2
+        self.gcn_layers = 2
 
     def inputs(self):
         return [tf.TensorSpec([None, None], tf.int32, 'input_x'),  # Xs
@@ -377,7 +378,7 @@ class Model(ModelDesc):
 
         with tf.variable_scope('entity_type_classification'):
             entity_query = tf.get_variable('head_query', [rnn_output_dim, 1],
-                                           initializer=tf.contrib.layers.xavier_initializer())
+                                           initializer=tf.contrib.layers.xavier_initializer(),regularizer=self.regularizer)
             # 以句子中的词index建立索引
             s_idx = tf.range(0, total_sents, 1, dtype=tf.int32)
             head_index = tf.concat(
@@ -442,7 +443,7 @@ class Model(ModelDesc):
             # bilinear classifier excluding the final dot product
             arc_head = tf.layers.dense(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
             W = tf.get_variable('shared_W', shape=[self.params.projection_size, 1,
-                                                   self.params.depparse_projection_size])
+                                                   self.params.depparse_projection_size],regularizer=self.regularizer)
             arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
             shape = tf.shape(arc_dep)
             arc_dep = tf.reshape(arc_dep, [shape[0], -1, self.params.depparse_projection_size])
@@ -477,7 +478,7 @@ class Model(ModelDesc):
         # word attention
         with tf.variable_scope('word_attention') as scope:
             word_query = tf.get_variable('word_query', [de_out_dim, 1],
-                                         initializer=tf.contrib.layers.xavier_initializer())
+                                         initializer=tf.contrib.layers.xavier_initializer(),regularizer=self.regularizer)
             sent_repre = tf.reshape(
                 tf.matmul(
                     tf.reshape(
@@ -498,7 +499,7 @@ class Model(ModelDesc):
 
         with tf.variable_scope('sentence_attention') as scope:
             sentence_query = tf.get_variable('sentence_query', [de_out_dim, 1],
-                                             initializer=tf.contrib.layers.xavier_initializer())
+                                             initializer=tf.contrib.layers.xavier_initializer(),regularizer=self.regularizer)
 
             def getSentenceAtt(num):
                 num_sents = num[1] - num[0]
@@ -583,7 +584,7 @@ def resume_train(ds_train, ds_test, params):
     return AutoResumeTrainConfig(
         always_resume=False,
         data=QueueInput(ds_train),
-        session_init=get_model_loader('./train_log/edr/model-{}'.format(params.model)),
+        session_init=get_model_loader('./train_log/edr2/model-{}'.format(params.model)),
         starting_epoch=params.start_epoch,
         callbacks=[
             ModelSaver(),
@@ -609,7 +610,8 @@ def predict(model, model_path, data_path):
         model=model,
         session_init=get_model_loader(model_path),
         input_names=['input_x', 'input_pos1', 'input_pos2', 'head_pos', 'tail_pos', 'dep_mask', 'x_len', 'seq_len',
-                     'total_sents','total_bags', 'sent_num', 'input_y', 'dep_y','head_label','tail_label','rec_dropout', 'dropout'],
+                     'total_sents', 'total_bags', 'sent_num', 'input_y', 'dep_y', 'head_label', 'tail_label',
+                     'rec_dropout', 'dropout'],
         output_names=['logits', 'input_y']
     )
     pred = SimpleDatasetPredictor(pred_config, ds)
@@ -698,12 +700,12 @@ if __name__ == '__main__':
         launch_train_with_config(resume_config, SimpleTrainer())
 
     elif args.command == 'predict':
-        with open('./train_log/edr/edrpn_{}_{}.txt'.format(args.model, args.epochs), 'w', encoding='utf-8')as f:
+        with open('./train_log/edr2/edr2pn_{}_{}.txt'.format(args.model, args.epochs), 'w', encoding='utf-8')as f:
 
             for model in [str(args.model + i * 4580) for i in range(args.epochs)]:
                 f.write(model + '\t')
                 for pnpath in ['./mdb/pn1.mdb', './mdb/pn2.mdb', './mdb/pn3.mdb']:
-                    p100, p200, p300 = predict(Model(args), os.path.join('./train_log/edr/', 'model-' + model), pnpath)
+                    p100, p200, p300 = predict(Model(args), os.path.join('./train_log/edr2/', 'model-' + model), pnpath)
                     logger.info('    {}:P@100:{}  P@200:{}  P@300:{}\n'.format(pnpath, p100, p200, p300))
                     line = "{}\t{}\t{}\t".format(p100, p200, p300)
                     f.write(line)
