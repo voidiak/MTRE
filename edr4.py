@@ -99,7 +99,10 @@ class getbatch(ProxyDataFlow):
 class WarmupModel(ModelDesc):
     def __init__(self, params):
         self.params = params
-        self.regularizer = tf.contrib.layers.l2_regularizer(scale=self.params.l2)
+        if self.params.l2 == 0.0:
+            self.regularizer = None
+        else:
+            self.regularizer = tf.contrib.layers.l2_regularizer(scale=self.params.l2)
         self.load_data()
 
     def load_data(self):
@@ -173,7 +176,7 @@ class WarmupModel(ModelDesc):
 
         with tf.variable_scope('entity_type_classification'):
             entity_query = tf.get_variable('head_query', [rnn_output_dim, 1],
-                                           initializer=tf.contrib.layers.xavier_initializer(),regularizer=self.regularizer)
+                                           initializer=tf.contrib.layers.xavier_initializer())
             # 以句子中的词index建立索引
             s_idx = tf.range(0, total_sents, 1, dtype=tf.int32)
             head_index = tf.concat(
@@ -224,10 +227,8 @@ class WarmupModel(ModelDesc):
 
         with tf.variable_scope('entity_fully_connected_layer') as scope:
             w_e = tf.get_variable('w', [rnn_output_dim, self.num_entity_class],
-                                  initializer=tf.contrib.layers.xavier_initializer(),
-                                  regularizer=self.regularizer)
-            b_e = tf.get_variable('b', initializer=np.zeros([self.num_entity_class]).astype(np.float32),
-                                  regularizer=self.regularizer)
+                                  initializer=tf.contrib.layers.xavier_initializer())
+            b_e = tf.get_variable('b', initializer=np.zeros([self.num_entity_class]).astype(np.float32))
             hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
             tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
 
@@ -249,7 +250,7 @@ class WarmupModel(ModelDesc):
             arc_head = tf.layers.dense(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
             W = tf.get_variable('shared_W', shape=[self.params.projection_size, 1,
                                                    self.params.depparse_projection_size],
-                                initializer=tf.contrib.layers.xavier_initializer(), regularizer=self.regularizer)
+                                initializer=tf.contrib.layers.xavier_initializer())
             arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
             shape = tf.shape(arc_dep)
             arc_dep = tf.reshape(arc_dep, [shape[0], -1, self.params.depparse_projection_size])
@@ -289,8 +290,7 @@ class WarmupModel(ModelDesc):
     def optimizer(self):
         lr = tf.get_variable('learning_rate', initializer=0.001, trainable=False)
         opt = tf.train.AdamOptimizer(lr)
-        return optimizer.apply_grad_processors(
-            opt, [GlobalNormClip(5), SummaryGradient()])
+        return optimizer.apply_grad_processors(opt, [GlobalNormClip(5)])
 
 
 class Model(ModelDesc):
@@ -378,7 +378,7 @@ class Model(ModelDesc):
 
         with tf.variable_scope('entity_type_classification'):
             entity_query = tf.get_variable('head_query', [rnn_output_dim, 1],
-                                           initializer=tf.contrib.layers.xavier_initializer(),regularizer=self.regularizer)
+                                           initializer=tf.contrib.layers.xavier_initializer())
             # 以句子中的词index建立索引
             s_idx = tf.range(0, total_sents, 1, dtype=tf.int32)
             head_index = tf.concat(
@@ -443,7 +443,7 @@ class Model(ModelDesc):
             # bilinear classifier excluding the final dot product
             arc_head = tf.layers.dense(arc_head_hidden, self.params.depparse_projection_size, name='arc_head')
             W = tf.get_variable('shared_W', shape=[self.params.projection_size, 1,
-                                                   self.params.depparse_projection_size],regularizer=self.regularizer)
+                                                   self.params.depparse_projection_size])
             arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
             shape = tf.shape(arc_dep)
             arc_dep = tf.reshape(arc_dep, [shape[0], -1, self.params.depparse_projection_size])
@@ -478,7 +478,7 @@ class Model(ModelDesc):
         # word attention
         with tf.variable_scope('word_attention') as scope:
             word_query = tf.get_variable('word_query', [de_out_dim, 1],
-                                         initializer=tf.contrib.layers.xavier_initializer(),regularizer=self.regularizer)
+                                         initializer=tf.contrib.layers.xavier_initializer())
             sent_repre = tf.reshape(
                 tf.matmul(
                     tf.reshape(
@@ -499,7 +499,7 @@ class Model(ModelDesc):
 
         with tf.variable_scope('sentence_attention') as scope:
             sentence_query = tf.get_variable('sentence_query', [de_out_dim, 1],
-                                             initializer=tf.contrib.layers.xavier_initializer(),regularizer=self.regularizer)
+                                             initializer=tf.contrib.layers.xavier_initializer())
 
             def getSentenceAtt(num):
                 num_sents = num[1] - num[0]
@@ -522,10 +522,8 @@ class Model(ModelDesc):
         de_out_dim = 3 * de_out_dim
 
         with tf.variable_scope('fully_connected_layer') as scope:
-            w = tf.get_variable('w', [de_out_dim, self.num_class], initializer=tf.contrib.layers.xavier_initializer(),
-                                regularizer=self.regularizer)
-            b = tf.get_variable('b', initializer=np.zeros([self.num_class]).astype(np.float32),
-                                regularizer=self.regularizer)
+            w = tf.get_variable('w', [de_out_dim, self.num_class], initializer=tf.contrib.layers.xavier_initializer())
+            b = tf.get_variable('b', initializer=np.zeros([self.num_class]).astype(np.float32))
             re_out = tf.nn.xw_plus_b(bag_repre, w, b)
             re_out = tf.nn.dropout(re_out, dropout)
 
@@ -547,8 +545,7 @@ class Model(ModelDesc):
     def optimizer(self):
         lr = tf.get_variable('learning_rate', initializer=0.001, trainable=False)
         opt = tf.train.AdamOptimizer(lr)
-        return optimizer.apply_grad_processors(
-            opt, [GlobalNormClip(5), SummaryGradient()])
+        return optimizer.apply_grad_processors(opt, [GlobalNormClip(5)])
 
 
 def getdata(path, isTrain):
@@ -584,7 +581,7 @@ def resume_train(ds_train, ds_test, params):
     return AutoResumeTrainConfig(
         always_resume=False,
         data=QueueInput(ds_train),
-        session_init=get_model_loader('./train_log/edr2/model-{}'.format(params.model)),
+        session_init=get_model_loader('./train_log/edr4/model-{}'.format(params.model)),
         starting_epoch=params.start_epoch,
         callbacks=[
             ModelSaver(),
@@ -600,7 +597,7 @@ def resume_train(ds_train, ds_test, params):
             GPUMemoryTracker()
         ],
         model=Model(params),
-        max_epoch=params.start_epoch + params.epochs,
+        max_epoch=params.start_epoch + params.epochs-1,
     )
 
 
@@ -700,12 +697,12 @@ if __name__ == '__main__':
         launch_train_with_config(resume_config, SimpleTrainer())
 
     elif args.command == 'predict':
-        with open('./train_log/edr2/edr2pn_{}_{}.txt'.format(args.model, args.epochs), 'w', encoding='utf-8')as f:
+        with open('./train_log/edr4/edr4pn_{}_{}.txt'.format(args.model, args.epochs), 'w', encoding='utf-8')as f:
 
             for model in [str(args.model + i * 4580) for i in range(args.epochs)]:
                 f.write(model + '\t')
                 for pnpath in ['./mdb/pn1.mdb', './mdb/pn2.mdb', './mdb/pn3.mdb']:
-                    p100, p200, p300 = predict(Model(args), os.path.join('./train_log/edr2/', 'model-' + model), pnpath)
+                    p100, p200, p300 = predict(Model(args), os.path.join('./train_log/edr4/', 'model-' + model), pnpath)
                     logger.info('    {}:P@100:{}  P@200:{}  P@300:{}\n'.format(pnpath, p100, p200, p300))
                     line = "{}\t{}\t{}\t".format(p100, p200, p300)
                     f.write(line)
