@@ -172,12 +172,11 @@ class WarmupModel(ModelDesc):
             embeds = tf.concat([word_embeded, pos1_embeded, pos2_embeded], axis=2)
 
         with tf.variable_scope('Bi_rnn') as scope:
-            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.keras.layers.GRUCell(units=self.params.rnn_dim, name='FW_GRU'),
+            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(units=self.params.rnn_dim, name='FW_GRU'),
                                                     output_keep_prob=rec_dropout)
-            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.keras.layers.GRUCell(units=self.params.rnn_dim, name='BW_GRU'),
+            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(units=self.params.rnn_dim, name='BW_GRU'),
                                                     output_keep_prob=rec_dropout)
             val, state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bk_cell, embeds, sequence_length=x_len, dtype=tf.float32)
-            val=
             hidden_states = tf.concat((val[0], val[1]), axis=2)
             rnn_output_dim = self.params.rnn_dim * 2
 
