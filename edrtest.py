@@ -48,11 +48,11 @@ class getbatch(ProxyDataFlow):
 
             # Xs, X_len, Pos1s, Pos2s, DepMasks, DepLabels, max_seq_len = self.pad_dynamic(Xs, Pos1s, Pos2s, DepMasks, DepLabels)
             X_len, max_seq_len=self.pad_dynamic(Xs)
-            Xs = pad_sequences(Xs, max_seq_len)
-            Pos1s = pad_sequences(Pos1s, max_seq_len)
-            Pos2s = pad_sequences(Pos2s, max_seq_len)
-            DepMasks = pad_sequences(DepMasks, max_seq_len)
-            DepLabels = pad_sequences(DepLabels, max_seq_len)
+            Xs = pad_sequences(Xs, max_seq_len, padding='post')
+            Pos1s = pad_sequences(Pos1s, max_seq_len, padding='post')
+            Pos2s = pad_sequences(Pos2s, max_seq_len, padding='post')
+            DepMasks = pad_sequences(DepMasks, max_seq_len, padding='post')
+            DepLabels = pad_sequences(DepLabels, max_seq_len, padding='post')
             ReLabels = self.getOneHot(Y, 53)
             total_sents = num
             total_bags = len(Y)

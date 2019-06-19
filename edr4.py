@@ -48,11 +48,11 @@ class getbatch(ProxyDataFlow):
 
             # Xs, X_len, Pos1s, Pos2s, DepMasks, DepLabels, max_seq_len = self.pad_dynamic(Xs, Pos1s, Pos2s, DepMasks, DepLabels)
             X_len, max_seq_len=self.pad_dynamic(Xs)
-            Xs = pad_sequences(Xs, max_seq_len)
-            Pos1s = pad_sequences(Pos1s, max_seq_len)
-            Pos2s = pad_sequences(Pos2s, max_seq_len)
-            DepMasks = pad_sequences(DepMasks, max_seq_len)
-            DepLabels = pad_sequences(DepLabels, max_seq_len)
+            Xs = pad_sequences(Xs, max_seq_len, padding='post')
+            Pos1s = pad_sequences(Pos1s, max_seq_len, padding='post')
+            Pos2s = pad_sequences(Pos2s, max_seq_len, padding='post')
+            DepMasks = pad_sequences(DepMasks, max_seq_len, padding='post')
+            DepLabels = pad_sequences(DepLabels, max_seq_len, padding='post')
             ReLabels = self.getOneHot(Y, 53)
             total_sents = num
             total_bags = len(Y)
@@ -172,13 +172,12 @@ class WarmupModel(ModelDesc):
             embeds = tf.concat([word_embeded, pos1_embeded, pos2_embeded], axis=2)
 
         with tf.variable_scope('Bi_rnn') as scope:
-            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.params.rnn_dim, name='FW_GRU'),
+            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.keras.layers.GRUCell(units=self.params.rnn_dim, name='FW_GRU'),
                                                     output_keep_prob=rec_dropout)
-            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.params.rnn_dim, name='BW_GRU'),
+            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.keras.layers.GRUCell(units=self.params.rnn_dim, name='BW_GRU'),
                                                     output_keep_prob=rec_dropout)
-            val, state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bk_cell, embeds, sequence_length=x_len,
-                                                         dtype=tf.float32)
-
+            val, state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bk_cell, embeds, sequence_length=x_len, dtype=tf.float32)
+            val=
             hidden_states = tf.concat((val[0], val[1]), axis=2)
             rnn_output_dim = self.params.rnn_dim * 2
 
@@ -241,9 +240,7 @@ class WarmupModel(ModelDesc):
             tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
 
         with tf.variable_scope('dep_predictions'):
-            # Projection 考虑现在hidden states是多个句子的串联，用cnn
-            # arc_dep_hidden = FullyConnected('arc_dep_hidden',hidden_states, self.params.projection_size)
-            # arc_head_hidden = FullyConnected('arc_head_hidden',hidden_states, self.params.projection_size)
+
             arc_dep_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_dep_hidden')
             arc_head_hidden = tf.layers.dense(hidden_states, self.params.projection_size, name='arc_head_hidden')
             # activation
@@ -374,9 +371,9 @@ class Model(ModelDesc):
         # embeds_dim = self.params.word_embed_dim + 2 * self.params.pos_dim
 
         with tf.variable_scope('Bi_rnn') as scope:
-            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.params.rnn_dim, name='FW_GRU'),
+            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.contrib.cudnn_rnn.CudnnGRU(self.params.rnn_dim, name='FW_GRU'),
                                                     output_keep_prob=rec_dropout)
-            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.params.rnn_dim, name='BW_GRU'),
+            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.contrib.cudnn_rnn.CudnnGRU(self.params.rnn_dim, name='BW_GRU'),
                                                     output_keep_prob=rec_dropout)
             val, state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bk_cell, embeds, sequence_length=x_len,
                                                          dtype=tf.float32)
@@ -533,7 +530,7 @@ class Model(ModelDesc):
             w = tf.get_variable('w', [de_out_dim, self.num_class], initializer=tf.contrib.layers.xavier_initializer())
             b = tf.get_variable('b', initializer=np.zeros([self.num_class]).astype(np.float32))
             re_out = tf.nn.xw_plus_b(bag_repre, w, b)
-            re_out = tf.nn.dropout(re_out, dropout)
+            # re_out = tf.nn.dropout(re_out, dropout)
 
         logits = tf.nn.softmax(re_out, name='logits')
         y_pred = tf.argmax(logits, axis=1, name='pred_y')
