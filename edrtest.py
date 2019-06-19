@@ -581,10 +581,12 @@ def get_config(ds_train, ds_test, params):
             MovingAverageSummary(),
             MergeAllSummaries(),
             GPUUtilizationTracker(),
-            GPUMemoryTracker()
+            GPUMemoryTracker(),
+            GraphProfiler(dump_metadata=True, dump_tracing=True, dump_event=True)
         ],
+        steps_per_epoch=10,
         model=WarmupModel(params),
-        max_epoch=4,
+        max_epoch=1,
     )
 
 
