@@ -46,8 +46,7 @@ class getbatch(ProxyDataFlow):
                 num += len(X)
                 SentNum.append([old_num, num, b])
 
-            # Xs, X_len, Pos1s, Pos2s, DepMasks, DepLabels, max_seq_len = self.pad_dynamic(Xs, Pos1s, Pos2s, DepMasks, DepLabels)
-            X_len, max_seq_len=self.pad_dynamic(Xs)
+            X_len, max_seq_len=self.getLen(Xs)
             Xs = pad_sequences(Xs, max_seq_len, padding='post')
             Pos1s = pad_sequences(Pos1s, max_seq_len, padding='post')
             Pos2s = pad_sequences(Pos2s, max_seq_len, padding='post')
@@ -72,37 +71,13 @@ class getbatch(ProxyDataFlow):
                 temp[i, rel] = 1
         return temp
 
-    # def pad_dynamic(self, X, pos1, pos2, dep_mask, dep):
-    def pad_dynamic(self, X):
-        # 为每个batch中的句子补位
-        seq_len = 0
+    def getLen(self, X):
+        max_len = 0
         x_len = np.zeros((len(X)), np.int32)
-
         for i, x in enumerate(X):
-            seq_len = max(seq_len, len(x))
+            max_len = max(max_len, len(x))
             x_len[i] = len(x)
-
-        # x_pad, _ = self.padData(X, seq_len)
-        # pos1_pad, _ = self.padData(pos1, seq_len)
-        # pos2_pad, _ = self.padData(pos2, seq_len)
-        # dep_mask_pad, _ = self.padData(dep_mask, seq_len)
-        # dep_pad, _ = self.padData(dep, seq_len)
-        #
-        # return x_pad, x_len, pos1_pad, pos2_pad, dep_mask_pad, dep_pad, seq_len
-
-        return x_len,seq_len
-
-    def padData(self, data, seq_len):
-        # 为句子补位
-        temp = np.zeros((len(data), seq_len), np.int32)
-        mask = np.zeros((len(data), seq_len), np.float32)
-
-        for i, ele in enumerate(data):
-            temp[i, :len(ele)] = ele[:seq_len]
-            mask[i, :len(ele)] = np.ones(len(ele[:seq_len]), np.float32)
-
-        return temp, mask
-
+        return x_len,max_len
 
 class WarmupModel(ModelDesc):
     def __init__(self, params):
@@ -172,9 +147,9 @@ class WarmupModel(ModelDesc):
             embeds = tf.concat([word_embeded, pos1_embeded, pos2_embeded], axis=2)
 
         with tf.variable_scope('Bi_rnn') as scope:
-            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(units=self.params.rnn_dim, name='FW_GRU'),
+            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.params.rnn_dim, name='FW_GRU'),
                                                     output_keep_prob=rec_dropout)
-            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(units=self.params.rnn_dim, name='BW_GRU'),
+            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.params.rnn_dim, name='BW_GRU'),
                                                     output_keep_prob=rec_dropout)
             val, state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bk_cell, embeds, sequence_length=x_len, dtype=tf.float32)
             hidden_states = tf.concat((val[0], val[1]), axis=2)
@@ -370,9 +345,9 @@ class Model(ModelDesc):
         # embeds_dim = self.params.word_embed_dim + 2 * self.params.pos_dim
 
         with tf.variable_scope('Bi_rnn') as scope:
-            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.contrib.cudnn_rnn.CudnnGRU(self.params.rnn_dim, name='FW_GRU'),
+            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.params.rnn_dim, name='FW_GRU'),
                                                     output_keep_prob=rec_dropout)
-            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.contrib.cudnn_rnn.CudnnGRU(self.params.rnn_dim, name='BW_GRU'),
+            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.params.rnn_dim, name='BW_GRU'),
                                                     output_keep_prob=rec_dropout)
             val, state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bk_cell, embeds, sequence_length=x_len,
                                                          dtype=tf.float32)
@@ -535,13 +510,27 @@ class Model(ModelDesc):
         y_pred = tf.argmax(logits, axis=1, name='pred_y')
         y_actual = tf.argmax(input_y, axis=1)
         accuracy = tf.cast(tf.equal(y_pred, y_actual), tf.float32, name='re_accu')
+
+        with tf.variable_scope('entity_fully_connected_layer') as scope:
+            w_e = tf.get_variable('w', [rnn_output_dim, self.num_entity_class],
+                                  initializer=tf.contrib.layers.xavier_initializer())
+            b_e = tf.get_variable('b', initializer=np.zeros([self.num_entity_class]).astype(np.float32))
+            hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
+            tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
+
+        label_y = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
+        head_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=hr_out,
+                                                                           labels=head_label))  # use sigmoid loss multi-label classification
+        tail_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=tr_out, labels=tail_label))
+
+        dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=arc_scores, labels=label_y)
+        dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
         re_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=re_out, labels=input_y))
-        loss = re_loss
+        loss = re_loss+0.8*(0.5*(head_loss+tail_loss)+dp_loss)
         if self.regularizer != None:
             loss += tf.contrib.layers.apply_regularization(self.regularizer,
                                                            tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
-        # loss=tf.losses.get_total_loss(add_regularization_losses=False,name='total_loss')
-        # summary.add_moving_summary(loss)
+
         loss = tf.identity(loss, name='total_loss')
         summary.add_moving_summary(loss)
         return loss
