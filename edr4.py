@@ -271,7 +271,6 @@ class WarmupModel(ModelDesc):
         opt = tf.train.AdamOptimizer(lr)
         return optimizer.apply_grad_processors(opt, [GlobalNormClip(5)])
 
-
 class Model(ModelDesc):
     def __init__(self, params):
         self.params = params
