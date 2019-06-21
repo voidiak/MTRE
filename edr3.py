@@ -45,8 +45,7 @@ class getbatch(ProxyDataFlow):
                 num += len(X)
                 SentNum.append([old_num, num, b])
 
-            Xs, X_len, Pos1s, Pos2s, DepMasks, DepLabels, max_seq_len = self.pad_dynamic(Xs, Pos1s, Pos2s, DepMasks, \
-                                                                                         DepLabels)
+            Xs, X_len, Pos1s, Pos2s, DepMasks, DepLabels, max_seq_len = self.pad_dynamic(Xs, Pos1s, Pos2s, DepMasks, DepLabels)
             Xs = np.array(Xs)
             ReLabels = self.getOneHot(Y, 53)
             total_sents = num
