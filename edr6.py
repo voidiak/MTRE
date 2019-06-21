@@ -573,7 +573,7 @@ def resume_train(ds_train, ds_test, params):
     return AutoResumeTrainConfig(
         always_resume=False,
         data=QueueInput(ds_train),
-        session_init=get_model_loader('./train_log/edr4:{}/model-18320'.format(params.name)),
+        session_init=get_model_loader('./train_log/edr6:{}/model-23448'.format(params.name)),
         starting_epoch=5,
         callbacks=[
             ModelSaver(),
@@ -659,17 +659,17 @@ if __name__ == '__main__':
     # train
     ds = getdata('./mdb/train.mdb', True)
     dss = getdata('./mdb/test.mdb', False)
-    config = get_config(ds, dss, args)
-    launch_train_with_config(config, SimpleTrainer())
+    # config = get_config(ds, dss, args)
+    # launch_train_with_config(config, SimpleTrainer())
     # resume
     resume_config = resume_train(ds, dss, args)
     launch_train_with_config(resume_config, SimpleTrainer())
     # predict
-    with open('./train_log/edr5:{}/edr5pn_{}.txt'.format(args.name, args.epochs), 'w', encoding='utf-8')as f:
-        for model in [str(22900 + i * 4580) for i in range(args.epochs)]:
+    with open('./train_log/edr6:{}/edr6pn_{}.txt'.format(args.name, args.epochs), 'w', encoding='utf-8')as f:
+        for model in [str(29310 + i * 5862) for i in range(args.epochs)]:
             f.write(model + '\t')
             for pnpath in ['./mdb/pn1.mdb', './mdb/pn2.mdb', './mdb/pn3.mdb']:
-                p100, p200, p300 = predict(Model(args), os.path.join('./train_log/edr5:{}/'.format(args.name),
+                p100, p200, p300 = predict(Model(args), os.path.join('./train_log/edr6:{}/'.format(args.name),
                                                                      'model-' + model), pnpath)
                 logger.info('    {}:P@100:{}  P@200:{}  P@300:{}\n'.format(pnpath, p100, p200, p300))
                 line = "{}\t{}\t{}\t".format(p100, p200, p300)
