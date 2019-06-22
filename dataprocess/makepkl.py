@@ -355,7 +355,7 @@ def getIdMap(vals, begin_idx=0):
     return ele2id
 
 
-voc2id = getIdMap(vocab, 1)
+voc2id = getIdMap(vocab)
 id2voc = dict([(v, k) for k, v in voc2id.items()])
 
 print('Chosen Vocabulary:\t{}'.format(len(vocab)))
@@ -430,11 +430,11 @@ def splitBags(data, chunk_size):
     print('deleted bag :{}  added bag :{}'.format(delbag, addbag))
     return data
 
-train_data = procData(data['train'], 'train')
-train_data = splitBags(train_data, 100)
+# train_data = procData(data['train'], 'train')
+# train_data = splitBags(train_data, 100)
 
-test_data = procData(data['test'], 'test')
-test_data = splitBags(test_data, 100)
+# test_data = procData(data['test'], 'test')
+# test_data = splitBags(test_data, 100)
 
 param_data = {
     "voc2id": voc2id,
@@ -445,8 +445,8 @@ param_data = {
     'e_type2id': type2id
 }
 print('writing data')
-pickle.dump(train_data, open('/data/MLRE-NG/PKL/train.pkl', 'wb'))
-pickle.dump(test_data, open('/data/MLRE-NG/PKL/test.pkl', 'wb'))
+# pickle.dump(train_data, open('/data/MLRE-NG/PKL/train.pkl', 'wb'))
+# pickle.dump(test_data, open('/data/MLRE-NG/PKL/test.pkl', 'wb'))
 pickle.dump(param_data, open('/data/MLRE-NG/PKL/dict.pkl', 'wb'))
 
 
@@ -502,8 +502,8 @@ def getPNdata(data):
     return p_one, p_two, p_all
 
 
-p1_data, p2_data, p3_data = getPNdata(test_data)
-pickle.dump(p1_data, open('/data/MLRE-NG/PKL/pn1.pkl', 'wb'))
-pickle.dump(p2_data, open('/data/MLRE-NG/PKL/pn2.pkl', 'wb'))
-pickle.dump(p3_data, open('/data/MLRE-NG/PKL/pn3.pkl', 'wb'))
+# p1_data, p2_data, p3_data = getPNdata(test_data)
+# pickle.dump(p1_data, open('/data/MLRE-NG/PKL/pn1.pkl', 'wb'))
+# pickle.dump(p2_data, open('/data/MLRE-NG/PKL/pn2.pkl', 'wb'))
+# pickle.dump(p3_data, open('/data/MLRE-NG/PKL/pn3.pkl', 'wb'))
 print('writing over')

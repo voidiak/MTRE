@@ -6,7 +6,6 @@ from tensorpack import ProxyDataFlow
 from tensorpack.dataflow import LMDBSerializer, MultiProcessRunnerZMQ
 from tensorpack.tfutils import optimizer
 from tensorpack.utils import logger
-import gensim
 
 WORD_EMBED_DIM = 50
 POS_EMBED_DIM = 5
@@ -105,7 +104,7 @@ class WarmupModel(ModelDesc):
         self.rnn_dim = params.rnn_dim
         self.proj_dim = params.proj_dim
         self.dep_proj_dim = params.dep_proj_dim
-        self.lr=params.lr
+        self.lr = params.lr
         if params.l2 == 0.0:
             self.regularizer = None
         else:
@@ -150,12 +149,10 @@ class WarmupModel(ModelDesc):
             embeds = tf.concat([word_embeded, pos1_embeded, pos2_embeded], axis=2)
 
         with tf.variable_scope('Bi_rnn'):
-            fw_cell = tf.contrib.rnn.DropoutWrapper(
-                tf.keras.layers.GRUCell(self.rnn_dim, kernel_regularizer=self.regularizer, name='FW_GRU'),
-                output_keep_prob=rec_dropout)
-            bk_cell = tf.contrib.rnn.DropoutWrapper(
-                tf.keras.layers.GRUCell(self.rnn_dim, kernel_regularizer=self.regularizer, name='BW_GRU'),
-                output_keep_prob=rec_dropout)
+            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.rnn_dim, name='FW_GRU'),
+                                                    output_keep_prob=rec_dropout)
+            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.rnn_dim, name='BW_GRU'),
+                                                    output_keep_prob=rec_dropout)
             val, state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bk_cell, embeds, sequence_length=x_len,
                                                          dtype=tf.float32)
             hidden_states = tf.concat((val[0], val[1]), axis=2)
@@ -296,15 +293,15 @@ class Model(ModelDesc):
         self.rnn_dim = params.rnn_dim
         self.proj_dim = params.proj_dim
         self.dep_proj_dim = params.dep_proj_dim
-        self.lr=params.lr
+        self.lr = params.lr
         if params.l2 == 0.0:
             self.regularizer = None
         else:
             self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
-        self.embed_matrix = load_pickle(params.embed_loc)
+        self.embed_matrix = load_pickle(EMBED_LOC)
         self.gcn_layers = 2
-        self.gcn_dim=params.gcn_dim
-        self.coe=params.coe
+        self.gcn_dim = params.gcn_dim
+        self.coe = params.coe
 
     def inputs(self):
         return [tf.TensorSpec([None, None], tf.int32, 'input_x'),  # Xs
@@ -351,7 +348,6 @@ class Model(ModelDesc):
                                                     output_keep_prob=rec_dropout)
             val, state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bk_cell, embeds, sequence_length=x_len,
                                                          dtype=tf.float32)
-
             hidden_states = tf.concat((val[0], val[1]), axis=2)
             rnn_output_dim = self.rnn_dim * 2
 
@@ -562,7 +558,7 @@ def get_config(ds_train, ds_test, params):
             PeriodicTrigger(
                 InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('ner_accu', 'ner_accuracy'),
                                           ClassificationError('dep_accu', 'dep_accuracy')]),
-                every_k_epochs=2),
+                every_k_epochs=1),
             MovingAverageSummary(),
             MergeAllSummaries(),
         ],
@@ -571,11 +567,11 @@ def get_config(ds_train, ds_test, params):
     )
 
 
-def resume_train(ds_train, ds_test, load_path, params):
+def resume_train(ds_train, ds_test, model_path, params):
     return AutoResumeTrainConfig(
         always_resume=False,
         data=QueueInput(ds_train),
-        session_init=get_model_loader(load_path),
+        session_init=get_model_loader(model_path),
         starting_epoch=params.pre_epochs + 1,
         callbacks=[
             ModelSaver(),
@@ -583,9 +579,10 @@ def resume_train(ds_train, ds_test, load_path, params):
                                    lambda x: x * 0.2, 0, 5),
             PeriodicTrigger(
                 InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('re_accu', 'accuracy')]),
-                every_k_epochs=2),
+                every_k_epochs=1),
             MovingAverageSummary(),
             MergeAllSummaries(),
+            GPUMemoryTracker(),
         ],
         model=Model(params),
         max_epoch=params.pre_epochs + params.epochs,
@@ -630,34 +627,36 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-gpu', dest='gpu', default='0', help='gpu to use')
     parser.add_argument('-l2', dest='l2', default=0.0001, type=float, help='l2 regularization')
-    parser.add_argument('-embed_loc', dest='embed_loc', default='./embeddings.pkl', help='embed file')
     parser.add_argument('-seed', dest='seed', default=1234, type=int, help='seed for randomization')
     parser.add_argument('-rnn_dim', dest='rnn_dim', default=200, type=int, help='hidden state dimension of Bi-RNN')
     parser.add_argument('-gcn_dim', dest='gcn_dim', default=400, type=int, help='hidden state dimension of GCN')
     parser.add_argument('-proj_dim', dest='proj_dim', default=256, type=int,
-                        help='projection size for LSTMs and hidden layers')
+                        help='projection size for GRUs and hidden layers')
     parser.add_argument('-dep_proj_dim', dest='dep_proj_dim', default=64, type=int,
                         help='size of the representations used in the bilinear classifier for parsing')
     parser.add_argument('-coe', dest='coe', default=0.3, type=float, help='value for loss addition')
     parser.add_argument('-lr', dest='lr', default=0.001, type=float, help='learning rate')
-    parser.add_argument('-name', dest='name', required=True, help='name of the run')
     parser.add_argument('-pre_epochs', dest='pre_epochs', required=True, type=int, help='pretraining epochs')
-    parser.add_argument('-epochs', dest='epochs', required=True, type=int, help='epochs to predict')
+    parser.add_argument('-epochs', dest='epochs', required=True, type=int, help='epochs to train/predict')
     parser.add_argument('-batch_size', dest='batch_size', required=True, type=int, help='batch size')
     subparsers = parser.add_subparsers(title='command', dest='command')
     parser_pretrain = subparsers.add_parser('pretrain')
     parser_train = subparsers.add_parser('train')
     parser_predict = subparsers.add_parser('predict')
     args = parser.parse_args()
+    argdict = vars(args)
+    name = 'l2_{}_rnn_dim_{}_gcn_dim_{}_proj_dim_{}_dep_proj_dim_{}_coe_{}_lr_{}_pre_epochs_{}_epochs_{}_batch_size_{}' \
+        .format(argdict['l2'], argdict['rnn_dim'], argdict['gcn_dim'], argdict['proj_dim'], argdict['dep_proj_dim'],
+                argdict['coe'],
+                argdict['lr'], argdict['pre_epochs'], argdict['epochs'], argdict['batch_size'])
+    logger.auto_set_dir(action='k', name=name)
     set_gpu(args.gpu)
     step = int(293142 / args.batch_size)
-    if args.command == 'pre_train':
+    if args.command == 'pretrain':
         # set seed
         tf.set_random_seed(args.seed)
         random.seed(args.seed)
         np.random.seed(args.seed)
-        # set log
-        logger.auto_set_dir(action='k', name=args.name)
         # train
         ds = getdata('./mdb/train.mdb', args.batch_size, True)
         dss = getdata('./mdb/test.mdb', args.batch_size, False)
@@ -667,16 +666,16 @@ if __name__ == '__main__':
         ds = getdata('./mdb/train.mdb', args.batch_size, True)
         dss = getdata('./mdb/test.mdb', args.batch_size, False)
         # resume
-        load_path = './train_log/edr6:{}/model-{}'.format(args.name, step * args.pre_epochs)
+        load_path = './train_log/edr6:{}/model-{}'.format(name, step * args.pre_epochs)
         resume_config = resume_train(ds, dss, load_path, args)
         launch_train_with_config(resume_config, SimpleTrainer())
     elif args.command == 'predict':
         # predict
-        with open('./train_log/edr6:{}/edr6pn_pre{}.txt'.format(args.name, args.pre_epochs), 'w', encoding='utf-8')as f:
+        with open('./train_log/edr6:{}/edr6pn_pre{}.txt'.format(name, args.pre_epochs), 'w', encoding='utf-8')as f:
             for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs)]:
                 f.write(model + '\t')
                 for pnpath in ['./mdb/pn1.mdb', './mdb/pn2.mdb', './mdb/pn3.mdb']:
-                    p100, p200, p300 = predict(Model(args), os.path.join('./train_log/edr6:{}/'.format(args.name),
+                    p100, p200, p300 = predict(Model(args), os.path.join('./train_log/edr6:{}/'.format(name),
                                                                          'model-' + model), pnpath, args.batch_size)
                     logger.info('    {}:P@100:{}  P@200:{}  P@300:{}\n'.format(pnpath, p100, p200, p300))
                     line = "{}\t{}\t{}\t".format(p100, p200, p300)
