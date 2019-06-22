@@ -282,11 +282,11 @@ class WarmupModel(ModelDesc):
         #     re_out = tf.nn.xw_plus_b(bag_repre, w, b)
         #     re_out=tf.nn.dropout(re_out,dropout)
 
-        logits = tf.nn.softmax(hr_out)
-        y_pred = tf.argmax(logits, axis=1)
-        y_actual = tf.argmax(head_label, axis=1)
-        # accuracy = tf.reduce_mean(tf.cast(tf.equal(y_pred, y_actual), tf.float32),name='accu')
-        accuracy = tf.cast(tf.equal(y_pred, y_actual), tf.float32,name='accu')
+        ner_logits = tf.nn.softmax(hr_out)
+        ner_pred = tf.argmax(ner_logits, axis=1)
+        ner_actual = tf.argmax(head_label, axis=1)
+        ner_accuracy_ = tf.cast(tf.equal(ner_pred, ner_actual), tf.float32, name='ner_accu')
+        ner_accuracy = tf.reduce_mean(ner_accuracy_)
 
 
         head_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=hr_out,
@@ -304,7 +304,7 @@ class WarmupModel(ModelDesc):
         # loss=tf.losses.get_total_loss(add_regularization_losses=False,name='total_loss')
         # summary.add_moving_summary(loss)
         loss=tf.identity(loss,name='total_loss')
-        summary.add_moving_summary(loss)
+        summary.add_moving_summary(loss, ner_accuracy)
         return loss
 
     def optimizer(self):
@@ -581,7 +581,7 @@ def get_config(ds_train, ds_test, params):
                                    lambda x: x * 0.2, 0, 5),
             HumanHyperParamSetter('learning_rate'),
             PeriodicTrigger(
-                InferenceRunner(ds_test, [ScalarStats('total_loss'),ClassificationError('accu','accuracy')]),
+                InferenceRunner(ds_test, [ScalarStats('total_loss'),ClassificationError('ner_accu', 'ner_accuracy')]),
                 every_k_epochs=2),
             MovingAverageSummary(),
             MergeAllSummaries(),

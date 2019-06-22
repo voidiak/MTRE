@@ -221,6 +221,13 @@ class WarmupModel(ModelDesc):
             hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
             tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
 
+        #get ner accuracy
+        ner_logits = tf.nn.softmax(hr_out)
+        ner_pred = tf.argmax(ner_logits, axis=1)
+        ner_actual = tf.argmax(head_label, axis=1)
+        ner_accuracy_ = tf.cast(tf.equal(ner_pred, ner_actual), tf.float32, name='ner_accu')
+        ner_accuracy = tf.reduce_mean(ner_accuracy_)
+
         with tf.variable_scope('dep_predictions'):
 
             arc_dep_hidden = tf.layers.dense(hidden_states, self.params.proj_dim, name='arc_dep_hidden')
@@ -258,18 +265,30 @@ class WarmupModel(ModelDesc):
             arc_scores += (dep_mask_ - 1) * 100
             nn_dep_out = arc_scores
 
-        label_y = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
+        dep_labels = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
+
+        # get dep accuracy
+        dep_logits=tf.nn.softmax(nn_dep_out)
+        dep_pred=tf.reshape(tf.argmax(dep_logits,axis=-1),[-1])
+        dep_actual=tf.reshape(tf.argmax(dep_labels,axis=-1),[-1])
+        y_mask=tf.cast(tf.reshape(dep_mask, [-1]), dtype=tf.bool)
+        pred_masked=tf.boolean_mask(dep_pred, y_mask)
+        actual_masked=tf.boolean_mask(dep_actual, y_mask)
+        dep_accuracy_=tf.cast(tf.equal(pred_masked, actual_masked), tf.float32, name='dep_accu')
+        dep_accuracy =tf.reduce_mean(dep_accuracy_)
+
+
         # use sigmoid loss multi-label classification
         head_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=hr_out, labels=head_label))
         tail_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=tr_out, labels=tail_label))
-        dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=label_y)
+        dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=dep_labels)
         dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
         loss = 0.5 * dp_loss + 0.25 * head_loss + 0.25 * tail_loss
         if self.regularizer is not None:
             loss += tf.contrib.layers.apply_regularization(self.regularizer,
                                                            tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
         loss = tf.identity(loss, name='total_loss')
-        summary.add_moving_summary(loss)
+        summary.add_moving_summary(loss, ner_accuracy, dep_accuracy)
         return loss
 
     def optimizer(self):
@@ -545,7 +564,7 @@ class Model(ModelDesc):
 
 def getdata(path, isTrain):
     ds = LMDBSerializer.load(path, shuffle=isTrain)
-    ds = getbatch(ds, 50, isTrain)
+    ds = getbatch(ds, 80, isTrain)
     if isTrain:
         ds = MultiProcessRunnerZMQ(ds, 2)
     return ds
@@ -647,32 +666,40 @@ if __name__ == '__main__':
     parser.add_argument('-lr',dest='lr',default=0.001,type=float,help='learning rate')
     parser.add_argument('-name', dest='name', required=True, help='name of the run')
     parser.add_argument('-epochs', dest='epochs', required=True, type=int, help='epochs to predict')
+    subparsers = parser.add_subparsers(title='command', dest='command')
+    parser_train = subparsers.add_parser('pre_train')
+    parser_train = subparsers.add_parser('train')
 
     args = parser.parse_args()
     set_gpu(args.gpu)
-    # set seed
-    tf.set_random_seed(args.seed)
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    # set log
-    logger.auto_set_dir(action='k', name=args.name)
-    # train
-    ds = getdata('./mdb/train.mdb', True)
-    dss = getdata('./mdb/test.mdb', False)
-    # config = get_config(ds, dss, args)
-    # launch_train_with_config(config, SimpleTrainer())
-    # resume
-    resume_config = resume_train(ds, dss, args)
-    launch_train_with_config(resume_config, SimpleTrainer())
-    # predict
-    with open('./train_log/edr5:{}/edr5pn_{}.txt'.format(args.name, args.epochs), 'w', encoding='utf-8')as f:
-        for model in [str(29310 + i * 5862) for i in range(args.epochs)]:
-            f.write(model + '\t')
-            for pnpath in ['./mdb/pn1.mdb', './mdb/pn2.mdb', './mdb/pn3.mdb']:
-                p100, p200, p300 = predict(Model(args), os.path.join('./train_log/edr5:{}/'.format(args.name),
-                                                                     'model-' + model), pnpath)
-                logger.info('    {}:P@100:{}  P@200:{}  P@300:{}\n'.format(pnpath, p100, p200, p300))
-                line = "{}\t{}\t{}\t".format(p100, p200, p300)
-                f.write(line)
-            f.write('\n')
-        f.close()
+    if args.command == 'pre_train':
+        # set seed
+        tf.set_random_seed(args.seed)
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        # set log
+        logger.auto_set_dir(action='k', name=args.name)
+        # train
+        ds = getdata('./mdb/train.mdb', True)
+        dss = getdata('./mdb/test.mdb', False)
+        config = get_config(ds, dss, args)
+        launch_train_with_config(config, SimpleTrainer())
+
+    elif args.command == 'train':
+        ds = getdata('./mdb/train.mdb', True)
+        dss = getdata('./mdb/test.mdb', False)
+        # resume
+        resume_config = resume_train(ds, dss, args)
+        launch_train_with_config(resume_config, SimpleTrainer())
+        # predict
+        with open('./train_log/edr5:{}/edr5pn_{}.txt'.format(args.name, args.epochs), 'w', encoding='utf-8')as f:
+            for model in [str(29310 + i * 5862) for i in range(args.epochs)]:
+                f.write(model + '\t')
+                for pnpath in ['./mdb/pn1.mdb', './mdb/pn2.mdb', './mdb/pn3.mdb']:
+                    p100, p200, p300 = predict(Model(args), os.path.join('./train_log/edr5:{}/'.format(args.name),
+                                                                         'model-' + model), pnpath)
+                    logger.info('    {}:P@100:{}  P@200:{}  P@300:{}\n'.format(pnpath, p100, p200, p300))
+                    line = "{}\t{}\t{}\t".format(p100, p200, p300)
+                    f.write(line)
+                f.write('\n')
+            f.close()
