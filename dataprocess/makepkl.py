@@ -447,7 +447,7 @@ param_data = {
 print('writing data')
 pickle.dump(train_data, open('/data/MLRE-NG/PKL/train.pkl', 'wb'))
 pickle.dump(test_data, open('/data/MLRE-NG/PKL/test.pkl', 'wb'))
-pickle.dump(param_data, open('/data/MLRE-NG/PKL/params.pkl', 'wb'))
+pickle.dump(param_data, open('/data/MLRE-NG/PKL/dict.pkl', 'wb'))
 
 
 

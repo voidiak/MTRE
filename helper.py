@@ -16,15 +16,10 @@ from tensorflow.python.ops import array_ops
 #设置numpy的精度
 np.set_printoptions(precision=4)
 
-#从w2v文件中读出embeddings
-def getEmbeddings(model,wrd_list,embed_dims):
-    embed_list=[]
-    for word in wrd_list:
-        if word in model.vocab:
-            embed_list.append(model.word_vec(word))
-        else:
-            embed_list.append(np.random.randn(embed_dims))
-    return np.array(embed_list,dtype=np.float32)
+#从pkl文件中读出embeddings
+def load_pickle(path):
+  with tf.gfile.GFile(path, 'rb') as f:
+    return pickle.load(f)
 
 #gpu设置
 def set_gpu(gpus):
