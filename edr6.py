@@ -573,12 +573,12 @@ def get_config(ds_train, ds_test, params):
     )
 
 
-def resume_train(ds_train, ds_test, model_path, params):
+def resume_train(ds_train, ds_test, model_path, params, current_epoch, add_epochs):
     return AutoResumeTrainConfig(
         always_resume=False,
         data=QueueInput(ds_train),
         session_init=get_model_loader(model_path),
-        starting_epoch=params.pre_epochs + 1,
+        starting_epoch=current_epoch + 1,
         callbacks=[
             ModelSaver(),
             StatMonitorParamSetter('learning_rate', 'total_loss',
@@ -591,7 +591,7 @@ def resume_train(ds_train, ds_test, model_path, params):
             GPUMemoryTracker(),
         ],
         model=Model(params),
-        max_epoch=params.pre_epochs + params.epochs,
+        max_epoch=current_epoch + add_epochs,
     )
 
 
@@ -701,8 +701,12 @@ if __name__ == '__main__':
     subparsers = parser.add_subparsers(title='command', dest='command')
     parser_pretrain = subparsers.add_parser('pretrain')
     parser_train = subparsers.add_parser('train')
+    parser_train.add_argument('-previous_model', dest='previous_model', default=0, type=int,
+                              help='previous model to resume')
+    parser_train.add_argument('-add_epochs', dest='add_epochs', default=0, type=int, help='epochs to continue')
     parser_evaluate = subparsers.add_parser('eval')
     parser_evaluate.add_argument('-best_model', dest='best_model', default=0, type=int, help='best model to evaluate')
+    parser_evaluate.add_argument('-add_epochs', dest='add_epochs', default=0, type=int, help='epochs to continue')
     args = parser.parse_args()
     argdict = vars(args)
     name = 'l2_{}_rnn_dim_{}_gcn_dim_{}_proj_dim_{}_dep_proj_dim_{}_coe_{}_lr_{}_pre_epochs_{}_epochs_{}_batch_size_{}' \
@@ -729,9 +733,16 @@ if __name__ == '__main__':
         ds = getdata('./mdb/train.mdb', args.batch_size, True)
         dss = getdata('./mdb/test.mdb', args.batch_size, False)
         # resume
-        load_path = './train_log/edr6:{}/model-{}'.format(name, step * args.pre_epochs)
-        resume_config = resume_train(ds, dss, load_path, args)
-        launch_train_with_config(resume_config, SimpleTrainer())
+        if args.previous_model:
+            current_epoch = args.previous_model // step
+            load_path = './train_log/edr6:{}/model-{}'.format(name, args.previous_model)
+            resume_config = resume_train(ds, dss, load_path, args, current_epoch, args.add_epochs)
+            launch_train_with_config(resume_config, SimpleTrainer())
+        else:
+            current_step = step * args.pre_epochs
+            load_path = './train_log/edr6:{}/model-{}'.format(name, current_step)
+            resume_config = resume_train(ds, dss, load_path, args, args.pre_epochs, args.epochs)
+            launch_train_with_config(resume_config, SimpleTrainer())
     elif args.command == 'eval':
         # predict
         if args.best_model:
@@ -744,7 +755,7 @@ if __name__ == '__main__':
                 f.close()
         else:
             with open('./train_log/edr6:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
-                for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs)]:
+                for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs+args.add_epochs)]:
                     f.write(model + '\t')
                     for data in ['pn1', 'pn2', 'pn3']:
                         data_path = './mdb/{}.mdb'.format(data)
