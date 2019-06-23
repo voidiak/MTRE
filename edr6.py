@@ -671,7 +671,7 @@ if __name__ == '__main__':
         launch_train_with_config(resume_config, SimpleTrainer())
     elif args.command == 'predict':
         # predict
-        with open('./train_log/edr6:{}/edr6pn_pre{}.txt'.format(name, args.pre_epochs), 'w', encoding='utf-8')as f:
+        with open('./train_log/edr6:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
             for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs)]:
                 f.write(model + '\t')
                 for pnpath in ['./mdb/pn1.mdb', './mdb/pn2.mdb', './mdb/pn3.mdb']:
