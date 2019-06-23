@@ -8,7 +8,6 @@ except:
    import pickle
 import uuid,time,pdb,gensim,itertools
 from collections import defaultdict as ddict
-from sklearn.metrics import precision_recall_fscore_support, precision_recall_curve, average_precision_score
 from pprint import pprint
 from tensorflow.python.ops import array_ops
 #所有文件的库都在这里导入
@@ -21,10 +20,10 @@ def load_pickle(path):
   with tf.gfile.GFile(path, 'rb') as f:
     return pickle.load(f)
 
-#gpu设置
-def set_gpu(gpus):
-    os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"]=gpus
+# #gpu设置
+# def set_gpu(gpus):
+#     os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+#     os.environ["CUDA_VISIBLE_DEVICES"]=gpus
 
 #检查路径下文件是否存在
 def checkFile(filename):

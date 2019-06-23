@@ -6,13 +6,19 @@ from tensorpack import ProxyDataFlow
 from tensorpack.dataflow import LMDBSerializer, MultiProcessRunnerZMQ
 from tensorpack.tfutils import optimizer
 from tensorpack.utils import logger
+from sklearn.metrics import precision_recall_fscore_support, precision_recall_curve, average_precision_score
+import matplotlib;
+
+matplotlib.use('agg')
+import matplotlib.pyplot as plt
 
 WORD_EMBED_DIM = 50
 POS_EMBED_DIM = 5
-EMBED_LOC = './embeddings.pkl'
 ENTITY_TYPE_CLASS = 107
 RELATION_TYPE_CLASS = 53
 MAX_POS = (60 + 1) * 2 + 1
+EMBED_LOC = './embeddings.pkl'
+BASELINE_LOC = './baseline/'
 
 
 class getbatch(ProxyDataFlow):
@@ -589,9 +595,9 @@ def resume_train(ds_train, ds_test, model_path, params):
     )
 
 
-def predict(model, model_path, data_path, batchsize):
+def evaluate(model, model_path, data_path, batchsize):
     ds = getdata(data_path, batchsize, False)
-    pred_config = PredictConfig(
+    eval_config = PredictConfig(
         model=model,
         session_init=get_model_loader(model_path),
         input_names=['input_x', 'input_pos1', 'input_pos2', 'head_pos', 'tail_pos', 'dep_mask', 'x_len', 'seq_len',
@@ -599,27 +605,80 @@ def predict(model, model_path, data_path, batchsize):
                      'rec_dropout', 'dropout'],
         output_names=['logits', 'input_y']
     )
-    pred = SimpleDatasetPredictor(pred_config, ds)
+    pred = SimpleDatasetPredictor(eval_config, ds)
 
-    logit_list, label_list = [], []
+    logit_list, label_list, y_pred, y_gold = [], [], [], []
 
     for output in pred.get_result():
         logit_list += output[0].tolist()
         label_list += output[1].tolist()
+        y_pred += output[0].argmax(axis=1).tolist()
+        y_gold += output[1].argmax(axis=1).tolist()
 
     y_scores = np.array([e[1:] for e in logit_list]).reshape((-1))
     y_true = np.array([e[1:] for e in label_list]).reshape((-1))
-    allprob = np.reshape(np.array(y_scores), (-1))
-    allans = np.reshape(y_true, (-1))
-    order = np.argsort(-allprob)
 
-    def p_score(n):
-        correct_num = 0.0
-        for i in order[:n]:
-            correct_num += 1.0 if (allans[i] == 1) else 0
-        return correct_num / n
+    if data_path.startswith('./mdb/pn'):
+        allprob = np.reshape(np.array(y_scores), (-1))
+        allans = np.reshape(y_true, (-1))
+        order = np.argsort(-allprob)
 
-    return p_score(100), p_score(200), p_score(300)
+        def p_score(n):
+            correct_num = 0.0
+            for i in order[:n]:
+                correct_num += 1.0 if (allans[i] == 1) else 0
+            return correct_num / n
+
+        return p_score(100), p_score(200), p_score(300)
+
+    else:
+        precsion, recall, f1 = calculate_prf(y_gold, y_pred)
+        area_under_pr = average_precision_score(y_true, y_scores)
+        precision_, recall_, threshold = precision_recall_curve(y_true, y_scores)
+
+        return precsion, recall, f1, area_under_pr, precision_, recall_
+
+
+def calculate_prf(gold, pred):
+    pos_pred, pos_gt, true_pos = 0.0, 0.0, 0.0
+    for i in range(len(gold)):
+        if gold[i] != 0:
+            pos_gt += 1.0
+    for i in range(len(pred)):
+        if pred[i] != 0:
+            pos_pred += 1.0  # classified as pos example (Is-A-Relation)
+            if pred[i] == gold[i]:
+                true_pos += 1.0
+
+    precision = true_pos / (pos_pred + 1e-8)
+    recall = true_pos / (pos_gt + 1e-8)
+    f1 = 2 * precision * recall / (precision + recall + 1e-8)
+    return precision, recall, f1
+
+
+def plotPRCurve(precision, recall, dir):
+    plt.plot(recall[:], precision[:], label='MLRE', color='red', lw=1, marker='o', markevery=0.1, ms=6)
+
+    base_list = ['BGWA', 'PCNN+ATT', 'PCNN', 'MIMLRE', 'MultiR', 'Mintz', 'RESIDE']
+    color = ['purple', 'darkorange', 'green', 'xkcd:azure', 'orchid', 'cornflowerblue', 'yellow']
+    marker = ['d', 's', '^', '*', 'v', 'x', 'h', 'p']
+    plt.ylim([0.3, 1.0])
+    plt.xlim([0.0, 0.45])
+
+    for i, baseline in enumerate(base_list):
+        precision = np.load(BASELINE_LOC + baseline + '/precision.npy')
+        recall = np.load(BASELINE_LOC + baseline + '/recall.npy')
+        plt.plot(recall, precision, color=color[i], label=baseline, lw=1, marker=marker[i], markevery=0.1, ms=6)
+
+    plt.xlabel('Recall', fontsize=14)
+    plt.ylabel('Precision', fontsize=14)
+    plt.legend(loc="upper right", prop={'size': 12})
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+    plot_path = '{}/pr.pdf'.format(dir)
+    plt.savefig(plot_path)
+    print('Precision-Recall plot saved at: {}'.format(plot_path))
 
 
 if __name__ == '__main__':
@@ -642,7 +701,8 @@ if __name__ == '__main__':
     subparsers = parser.add_subparsers(title='command', dest='command')
     parser_pretrain = subparsers.add_parser('pretrain')
     parser_train = subparsers.add_parser('train')
-    parser_predict = subparsers.add_parser('predict')
+    parser_evaluate = subparsers.add_parser('eval')
+    parser_evaluate.add_argument('-best_model', dest='best_model', default=0, type=int, help='best model to evaluate')
     args = parser.parse_args()
     argdict = vars(args)
     name = 'l2_{}_rnn_dim_{}_gcn_dim_{}_proj_dim_{}_dep_proj_dim_{}_coe_{}_lr_{}_pre_epochs_{}_epochs_{}_batch_size_{}' \
@@ -650,7 +710,10 @@ if __name__ == '__main__':
                 argdict['coe'],
                 argdict['lr'], argdict['pre_epochs'], argdict['epochs'], argdict['batch_size'])
     logger.auto_set_dir(action='k', name=name)
-    set_gpu(args.gpu)
+
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+
     step = int(293142 / args.batch_size)
     if args.command == 'pretrain':
         # set seed
@@ -669,16 +732,26 @@ if __name__ == '__main__':
         load_path = './train_log/edr6:{}/model-{}'.format(name, step * args.pre_epochs)
         resume_config = resume_train(ds, dss, load_path, args)
         launch_train_with_config(resume_config, SimpleTrainer())
-    elif args.command == 'predict':
+    elif args.command == 'eval':
         # predict
-        with open('./train_log/edr6:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
-            for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs)]:
-                f.write(model + '\t')
-                for pnpath in ['./mdb/pn1.mdb', './mdb/pn2.mdb', './mdb/pn3.mdb']:
-                    p100, p200, p300 = predict(Model(args), os.path.join('./train_log/edr6:{}/'.format(name),
-                                                                         'model-' + model), pnpath, args.batch_size)
-                    logger.info('    {}:P@100:{}  P@200:{}  P@300:{}\n'.format(pnpath, p100, p200, p300))
-                    line = "{}\t{}\t{}\t".format(p100, p200, p300)
-                    f.write(line)
-                f.write('\n')
-            f.close()
+        if args.best_model:
+            test_path = './mdb/test.mdb'
+            best_model_path = os.path.join('./train_log/edr6:{}/'.format(name), 'model-' + str(args.best_model))
+            p, r, f1, aur, p_, r_ = evaluate(Model(args), best_model_path, test_path, args.batch_size)
+            plotPRCurve(p_, r_, './train_log/edr6:{}'.format(name))
+            with open('./train_log/edr6:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
+                f.write('precision:\t{}\nrecall:\t{}\nf1:\t{}\nauc:\t{}'.format(p, r, f1, aur))
+                f.close()
+        else:
+            with open('./train_log/edr6:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
+                for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs)]:
+                    f.write(model + '\t')
+                    for data in ['pn1', 'pn2', 'pn3']:
+                        data_path = './mdb/{}.mdb'.format(data)
+                        p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr6:{}/'.format(name),
+                                                                              'model-' + model), data_path, args.batch_size)
+                        logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))
+                        line = "{:.3f}\t{:.3f}\t{:.3f}\t".format(p100, p200, p300)
+                        f.write(line)
+                    f.write('\n')
+                f.close()
