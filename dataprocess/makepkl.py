@@ -430,24 +430,25 @@ def splitBags(data, chunk_size):
     print('deleted bag :{}  added bag :{}'.format(delbag, addbag))
     return data
 
-# train_data = procData(data['train'], 'train')
-# train_data = splitBags(train_data, 100)
+train_data_r = procData(data['train'], 'train')
+train_data = splitBags(train_data_r, 100)
+test_data_r = procData(data['test'], 'test')
+test_data = splitBags(test_data_r, 100)
 
-# test_data = procData(data['test'], 'test')
-# test_data = splitBags(test_data, 100)
-
-param_data = {
-    "voc2id": voc2id,
-    "id2voc": id2voc,
-    "max_pos": (MAX_POS + 1) * 2 + 1,
-    "rel2id": rel2id,
-    "dep2id": dep2id,
-    'e_type2id': type2id
-}
+# param_data = {
+#     "voc2id": voc2id,
+#     "id2voc": id2voc,
+#     "max_pos": (MAX_POS + 1) * 2 + 1,
+#     "rel2id": rel2id,
+#     "dep2id": dep2id,
+#     'e_type2id': type2id
+# }
 print('writing data')
-# pickle.dump(train_data, open('/data/MLRE-NG/PKL/train.pkl', 'wb'))
-# pickle.dump(test_data, open('/data/MLRE-NG/PKL/test.pkl', 'wb'))
-pickle.dump(param_data, open('/data/MLRE-NG/PKL/dict.pkl', 'wb'))
+pickle.dump(train_data_r, open('/data/MLRE-NG/PKL/train_r.pkl', 'wb'))
+pickle.dump(test_data_r, open('/data/MLRE-NG/PKL/test_r.pkl', 'wb'))
+pickle.dump(train_data, open('/data/MLRE-NG/PKL/train.pkl', 'wb'))
+pickle.dump(test_data, open('/data/MLRE-NG/PKL/test.pkl', 'wb'))
+# pickle.dump(param_data, open('/data/MLRE-NG/PKL/dict.pkl', 'wb'))
 
 
 
@@ -502,8 +503,13 @@ def getPNdata(data):
     return p_one, p_two, p_all
 
 
-# p1_data, p2_data, p3_data = getPNdata(test_data)
-# pickle.dump(p1_data, open('/data/MLRE-NG/PKL/pn1.pkl', 'wb'))
-# pickle.dump(p2_data, open('/data/MLRE-NG/PKL/pn2.pkl', 'wb'))
-# pickle.dump(p3_data, open('/data/MLRE-NG/PKL/pn3.pkl', 'wb'))
+p1_r, p2_r, p3_r = getPNdata(test_data_r)
+pickle.dump(p1_r, open('/data/MLRE-NG/PKL/pn1_r.pkl', 'wb'))
+pickle.dump(p2_r, open('/data/MLRE-NG/PKL/pn2_r.pkl', 'wb'))
+pickle.dump(p3_r, open('/data/MLRE-NG/PKL/pn3_r.pkl', 'wb'))
+
+p1_data, p2_data, p3_data = getPNdata(test_data)
+pickle.dump(p1_data, open('/data/MLRE-NG/PKL/pn1.pkl', 'wb'))
+pickle.dump(p2_data, open('/data/MLRE-NG/PKL/pn2.pkl', 'wb'))
+pickle.dump(p3_data, open('/data/MLRE-NG/PKL/pn3.pkl', 'wb'))
 print('writing over')

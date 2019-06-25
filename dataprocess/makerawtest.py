@@ -355,7 +355,7 @@ def getIdMap(vals, begin_idx=0):
     return ele2id
 
 
-voc2id = getIdMap(vocab, 1)
+voc2id = getIdMap(vocab)
 id2voc = dict([(v, k) for k, v in voc2id.items()])
 
 print('Chosen Vocabulary:\t{}'.format(len(vocab)))
