@@ -7,7 +7,7 @@ from tensorpack.dataflow import LMDBSerializer, MultiProcessRunnerZMQ
 from tensorpack.tfutils import optimizer
 from tensorpack.utils import logger
 from sklearn.metrics import precision_recall_fscore_support, precision_recall_curve, average_precision_score
-import matplotlib;
+import matplotlib
 
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
@@ -725,41 +725,41 @@ if __name__ == '__main__':
         random.seed(args.seed)
         np.random.seed(args.seed)
         # train
-        ds = getdata('./mdb/train.mdb', args.batch_size, True)
-        dss = getdata('./mdb/test.mdb', args.batch_size, False)
+        ds = getdata('./mdb/train_r.mdb', args.batch_size, True)
+        dss = getdata('./mdb/test_r.mdb', args.batch_size, False)
         config = get_config(ds, dss, args)
         launch_train_with_config(config, SimpleTrainer())
     elif args.command == 'train':
-        ds = getdata('./mdb/train.mdb', args.batch_size, True)
-        dss = getdata('./mdb/test.mdb', args.batch_size, False)
+        ds = getdata('./mdb/train_r.mdb', args.batch_size, True)
+        dss = getdata('./mdb/test_r.mdb', args.batch_size, False)
         # resume
         if args.previous_model:
             current_epoch = args.previous_model // step
-            load_path = './train_log/edr6:{}/model-{}'.format(name, args.previous_model)
+            load_path = './train_log/edr6_r:{}/model-{}'.format(name, args.previous_model)
             resume_config = resume_train(ds, dss, load_path, args, current_epoch, args.add_epochs)
             launch_train_with_config(resume_config, SimpleTrainer())
         else:
             current_step = step * args.pre_epochs
-            load_path = './train_log/edr6:{}/model-{}'.format(name, current_step)
+            load_path = './train_log/edr6_r:{}/model-{}'.format(name, current_step)
             resume_config = resume_train(ds, dss, load_path, args, args.pre_epochs, args.epochs)
             launch_train_with_config(resume_config, SimpleTrainer())
     elif args.command == 'eval':
         # predict
         if args.best_model:
-            test_path = './mdb/test.mdb'
-            best_model_path = os.path.join('./train_log/edr6:{}/'.format(name), 'model-' + str(args.best_model))
+            test_path = './mdb/test_r.mdb'
+            best_model_path = os.path.join('./train_log/edr6_r:{}/'.format(name), 'model-' + str(args.best_model))
             p, r, f1, aur, p_, r_ = evaluate(Model(args), best_model_path, test_path, args.batch_size)
-            plotPRCurve(p_, r_, './train_log/edr6:{}'.format(name))
-            with open('./train_log/edr6:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
+            plotPRCurve(p_, r_, './train_log/edr6_r:{}'.format(name))
+            with open('./train_log/edr6_r:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
                 f.write('precision:\t{}\nrecall:\t{}\nf1:\t{}\nauc:\t{}'.format(p, r, f1, aur))
                 f.close()
         else:
-            with open('./train_log/edr6:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
+            with open('./train_log/edr6_r:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
                 for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs+args.add_epochs)]:
                     f.write(model + '\t')
-                    for data in ['pn1', 'pn2', 'pn3']:
+                    for data in ['pn1_r', 'pn2_r', 'pn3_r']:
                         data_path = './mdb/{}.mdb'.format(data)
-                        p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr6:{}/'.format(name),
+                        p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr6_r:{}/'.format(name),
                                                                               'model-' + model), data_path, args.batch_size)
                         logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))
                         line = "{:.3f}\t{:.3f}\t{:.3f}\t".format(p100, p200, p300)
