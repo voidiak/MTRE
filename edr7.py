@@ -1,4 +1,4 @@
-from helper import *
+from utils import *
 from six.moves import range
 from tensorpack import *
 from tensorpack.tfutils.gradproc import GlobalNormClip, SummaryGradient

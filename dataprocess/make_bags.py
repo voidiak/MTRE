@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-from helper import *
+from utils import *
 import unicodedata
 import re
 import collections

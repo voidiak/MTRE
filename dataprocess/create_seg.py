@@ -1,4 +1,4 @@
-from helper import *
+from utils import *
 with open('addempty_train_sent.json','r',encoding='utf-8') as f:
     seg_label = []
     for k,line in enumerate(f):

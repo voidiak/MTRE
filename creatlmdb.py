@@ -1,6 +1,6 @@
 from tensorpack import *
 from tensorpack.dataflow import DataFlow, LMDBSerializer,DataFromList
-from helper import *
+from utils import *
 import json
 try:
     import cPickle as pickle
