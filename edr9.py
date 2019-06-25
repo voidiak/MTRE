@@ -7,7 +7,7 @@ from tensorpack.dataflow import LMDBSerializer, MultiProcessRunnerZMQ
 from tensorpack.tfutils import optimizer
 from tensorpack.utils import logger
 from sklearn.metrics import precision_recall_fscore_support, precision_recall_curve, average_precision_score
-import matplotlib
+import matplotlib;
 
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
@@ -17,7 +17,6 @@ POS_EMBED_DIM = 5
 ENTITY_TYPE_CLASS = 107
 RELATION_TYPE_CLASS = 53
 MAX_POS = (60 + 1) * 2 + 1
-BATCH_SIZE = 220
 EMBED_LOC = './embeddings.pkl'
 BASELINE_LOC = './baseline/'
 
@@ -117,8 +116,6 @@ class WarmupModel(ModelDesc):
         else:
             self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
         self.embed_matrix = load_pickle(EMBED_LOC)
-        self.gcn_layers = 2
-        self.gcn_dim = params.gcn_dim
 
     def inputs(self):
         return [tf.TensorSpec([None, None], tf.int32, 'input_x'),  # Xs
@@ -167,6 +164,71 @@ class WarmupModel(ModelDesc):
             hidden_states = tf.concat((val[0], val[1]), axis=2)
             rnn_output_dim = self.rnn_dim * 2
 
+        with tf.variable_scope('entity_type_classification'):
+            entity_query = tf.get_variable('head_query', [rnn_output_dim, 1],
+                                           initializer=tf.contrib.layers.xavier_initializer())
+            # 以句子中的词index建立索引
+            s_idx = tf.range(0, total_sents, 1, dtype=tf.int32)
+            head_index = tf.concat(
+                [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(head_pos, [total_sents, 1])], axis=-1)
+            tail_index = tf.concat(
+                [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(tail_pos, [total_sents, 1])], axis=-1)
+            # add null word vector
+            word_hidden_states = tf.concat([tf.zeros([total_sents, 1, rnn_output_dim]), hidden_states], axis=1)
+            # extract head/tail entity's hidden state. size (total_sents,hidden_dim)
+            head_repre_s = tf.gather_nd(word_hidden_states, head_index, name='head_entity_h_in_sentence')
+            tail_repre_s = tf.gather_nd(word_hidden_states, tail_index, name='tail_entity_h_in_sentence')
+
+            # 计算一个包中head实体的多个向量的att和
+            def getHeadRepre(num):
+                num_sents = num[1] - num[0]
+                bag_sents = head_repre_s[num[0]:num[1]]
+
+                head_att_weights = tf.nn.softmax(
+                    tf.reshape(tf.matmul(tf.tanh(bag_sents), entity_query), [num_sents]))
+
+                head_repre_ = tf.reshape(
+                    tf.matmul(
+                        tf.reshape(head_att_weights, [1, num_sents]),
+                        bag_sents
+                    ), [rnn_output_dim]
+                )
+                return head_repre_
+
+            # 计算一个包中tail实体的多个向量的att和
+            def getTailRepre(num):
+                num_sents = num[1] - num[0]
+                bag_sents = tail_repre_s[num[0]:num[1]]
+
+                tail_att_weights = tf.nn.softmax(
+                    tf.reshape(tf.matmul(tf.tanh(bag_sents), entity_query), [num_sents]))
+
+                tail_repre_ = tf.reshape(
+                    tf.matmul(
+                        tf.reshape(tail_att_weights, [1, num_sents]),
+                        bag_sents
+                    ), [rnn_output_dim]
+                )
+                return tail_repre_
+
+            # 一个batch中实体的向量表示dimension(batchsize,rnn_output_dim)
+            head_repre_b = tf.map_fn(getHeadRepre, sent_num, dtype=tf.float32)
+            tail_repre_b = tf.map_fn(getTailRepre, sent_num, dtype=tf.float32)
+
+        with tf.variable_scope('entity_fully_connected_layer'):
+            w_e = tf.get_variable('w', [rnn_output_dim, ENTITY_TYPE_CLASS],
+                                  initializer=tf.contrib.layers.xavier_initializer())
+            b_e = tf.get_variable('b', initializer=np.zeros([ENTITY_TYPE_CLASS]).astype(np.float32))
+            hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
+            tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
+
+        # get ner accuracy
+        ner_logits = tf.nn.softmax(hr_out)
+        ner_pred = tf.argmax(ner_logits, axis=1)
+        ner_actual = tf.argmax(head_label, axis=1)
+        ner_accuracy_ = tf.cast(tf.equal(ner_pred, ner_actual), tf.float32, name='ner_accu')
+        ner_accuracy = tf.reduce_mean(ner_accuracy_)
+
         with tf.variable_scope('dep_predictions'):
             arc_dep_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_dep_hidden')
             arc_head_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_head_hidden')
@@ -213,89 +275,6 @@ class WarmupModel(ModelDesc):
         actual_masked = tf.boolean_mask(dep_actual, y_mask)
         dep_accuracy_ = tf.cast(tf.equal(pred_masked, actual_masked), tf.float32, name='dep_accu')
         dep_accuracy = tf.reduce_mean(dep_accuracy_)
-
-        # gcn encoding dependency tree structure
-        dep_matrix = tf.nn.softmax(arc_scores)
-
-        with tf.variable_scope('gcn_encoder') as scope:
-            denom = tf.expand_dims(tf.reduce_sum(dep_matrix, axis=2), axis=2) + 1
-            # gcn_mask = tf.expand_dims(
-            #     tf.equal((tf.reduce_sum(dep_matrix, axis=2) + tf.reduce_sum(dep_matrix, axis=1)), 0), axis=2)
-            for l in range(self.gcn_layers):
-                Ax = tf.matmul(dep_matrix, hidden_states)
-                AxW = tf.layers.dense(Ax, self.gcn_dim)
-                AxW = AxW + tf.layers.dense(hidden_states, self.gcn_dim)
-                AxW = AxW / denom
-                gAxW = tf.nn.relu(AxW)
-                hidden_states = Dropout(gAxW, keep_prob=0.5) if l < self.gcn_layers - 1 else gAxW
-
-        de_out_dim = self.gcn_dim
-
-        with tf.variable_scope('entity_type_classification'):
-            entity_query = tf.get_variable('head_query', [de_out_dim, 1],
-                                           initializer=tf.contrib.layers.xavier_initializer())
-            # 以句子中的词index建立索引
-            s_idx = tf.range(0, total_sents, 1, dtype=tf.int32)
-            head_index = tf.concat(
-                [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(head_pos, [total_sents, 1])], axis=-1)
-            tail_index = tf.concat(
-                [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(tail_pos, [total_sents, 1])], axis=-1)
-            # add null word vector
-            word_hidden_states = tf.concat([tf.zeros([total_sents, 1, de_out_dim]), hidden_states], axis=1)
-            # extract head/tail entity's hidden state. size (total_sents,hidden_dim)
-            head_repre_s = tf.gather_nd(word_hidden_states, head_index, name='head_entity_h_in_sentence')
-            tail_repre_s = tf.gather_nd(word_hidden_states, tail_index, name='tail_entity_h_in_sentence')
-
-            # 计算一个包中head实体的多个向量的att和
-            def getHeadRepre(num):
-                num_sents = num[1] - num[0]
-                bag_sents = head_repre_s[num[0]:num[1]]
-
-                head_att_weights = tf.nn.softmax(
-                    tf.reshape(tf.matmul(tf.tanh(bag_sents), entity_query), [num_sents]))
-
-                head_repre_ = tf.reshape(
-                    tf.matmul(
-                        tf.reshape(head_att_weights, [1, num_sents]),
-                        bag_sents
-                    ), [de_out_dim]
-                )
-                return head_repre_
-
-            # 计算一个包中tail实体的多个向量的att和
-            def getTailRepre(num):
-                num_sents = num[1] - num[0]
-                bag_sents = tail_repre_s[num[0]:num[1]]
-
-                tail_att_weights = tf.nn.softmax(
-                    tf.reshape(tf.matmul(tf.tanh(bag_sents), entity_query), [num_sents]))
-
-                tail_repre_ = tf.reshape(
-                    tf.matmul(
-                        tf.reshape(tail_att_weights, [1, num_sents]),
-                        bag_sents
-                    ), [de_out_dim]
-                )
-                return tail_repre_
-
-            # 一个batch中实体的向量表示dimension(batchsize,rnn_output_dim)
-            head_repre_b = tf.map_fn(getHeadRepre, sent_num, dtype=tf.float32)
-            tail_repre_b = tf.map_fn(getTailRepre, sent_num, dtype=tf.float32)
-
-        with tf.variable_scope('entity_fully_connected_layer'):
-            w_e = tf.get_variable('w', [de_out_dim, ENTITY_TYPE_CLASS],
-                                  initializer=tf.contrib.layers.xavier_initializer())
-            b_e = tf.get_variable('b', initializer=np.zeros([ENTITY_TYPE_CLASS]).astype(np.float32))
-            hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
-            tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
-
-        # get ner accuracy
-        ner_logits = tf.nn.softmax(hr_out)
-        ner_pred = tf.argmax(ner_logits, axis=1)
-        ner_actual = tf.argmax(head_label, axis=1)
-        ner_accuracy_ = tf.cast(tf.equal(ner_pred, ner_actual), tf.float32, name='ner_accu')
-        ner_accuracy = tf.reduce_mean(ner_accuracy_)
-
         # use sigmoid loss multi-label classification
         head_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=hr_out, labels=head_label))
         tail_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=tr_out, labels=tail_label))
@@ -378,6 +357,57 @@ class Model(ModelDesc):
             hidden_states = tf.concat((val[0], val[1]), axis=2)
             rnn_output_dim = self.rnn_dim * 2
 
+        with tf.variable_scope('entity_type_classification'):
+            entity_query = tf.get_variable('entity_query', [rnn_output_dim, 1],
+                                           initializer=tf.contrib.layers.xavier_initializer())
+            # 以句子中的词index建立索引
+            s_idx = tf.range(0, total_sents, 1, dtype=tf.int32)
+            head_index = tf.concat(
+                [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(head_pos, [total_sents, 1])], axis=-1)
+            tail_index = tf.concat(
+                [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(tail_pos, [total_sents, 1])], axis=-1)
+            # add null word vector
+            word_hidden_states = tf.concat([tf.zeros([total_sents, 1, rnn_output_dim]), hidden_states], axis=1)
+            # extract head/tail entity's hidden state. size (total_sents,hidden_dim)
+            head_repre_s = tf.gather_nd(word_hidden_states, head_index, name='head_entity_h_in_sentence')
+            tail_repre_s = tf.gather_nd(word_hidden_states, tail_index, name='tail_entity_h_in_sentence')
+
+            # 计算一个包中head实体的多个向量的att和
+            def getHeadRepre(num):
+                num_sents = num[1] - num[0]
+                bag_sents = head_repre_s[num[0]:num[1]]
+
+                head_att_weights = tf.nn.softmax(
+                    tf.reshape(tf.matmul(tf.tanh(bag_sents), entity_query), [num_sents]))
+
+                head_repre_ = tf.reshape(
+                    tf.matmul(
+                        tf.reshape(head_att_weights, [1, num_sents]),
+                        bag_sents
+                    ), [rnn_output_dim]
+                )
+                return head_repre_
+
+            # 计算一个包中tail实体的多个向量的att和
+            def getTailRepre(num):
+                num_sents = num[1] - num[0]
+                bag_sents = tail_repre_s[num[0]:num[1]]
+
+                tail_att_weights = tf.nn.softmax(
+                    tf.reshape(tf.matmul(tf.tanh(bag_sents), entity_query), [num_sents]))
+
+                tail_repre_ = tf.reshape(
+                    tf.matmul(
+                        tf.reshape(tail_att_weights, [1, num_sents]),
+                        bag_sents
+                    ), [rnn_output_dim]
+                )
+                return tail_repre_
+
+            # 一个batch中实体的向量表示 dimension(batchsize,rnn_output_dim)
+            head_repre_b = tf.map_fn(getHeadRepre, sent_num, dtype=tf.float32)
+            tail_repre_b = tf.map_fn(getTailRepre, sent_num, dtype=tf.float32)
+
         with tf.variable_scope('dep_predictions'):
             # Projection 考虑现在hidden states是多个句子的串联，用cnn
             arc_dep_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_dep_hidden')
@@ -410,73 +440,22 @@ class Model(ModelDesc):
             arc_scores = word_score
 
         # gcn encoding dependency tree structure
-        dep_matrix = tf.nn.softmax(arc_scores)
+        # dep_matrix = tf.nn.softmax(arc_scores)
 
-        with tf.variable_scope('gcn_encoder') as scope:
-            denom = tf.expand_dims(tf.reduce_sum(dep_matrix, axis=2), axis=2) + 1
-            # gcn_mask = tf.expand_dims(
-            #     tf.equal((tf.reduce_sum(dep_matrix, axis=2) + tf.reduce_sum(dep_matrix, axis=1)), 0), axis=2)
-            for l in range(self.gcn_layers):
-                Ax = tf.matmul(dep_matrix, hidden_states)
-                AxW = tf.layers.dense(Ax, self.gcn_dim)
-                AxW = AxW + tf.layers.dense(hidden_states, self.gcn_dim)
-                AxW = AxW / denom
-                gAxW = tf.nn.relu(AxW)
-                hidden_states = Dropout(gAxW, keep_prob=0.5) if l < self.gcn_layers - 1 else gAxW
+        # with tf.variable_scope('gcn_encoder') as scope:
+        #     denom = tf.expand_dims(tf.reduce_sum(dep_matrix, axis=2), axis=2) + 1
+        #     # gcn_mask = tf.expand_dims(
+        #     #     tf.equal((tf.reduce_sum(dep_matrix, axis=2) + tf.reduce_sum(dep_matrix, axis=1)), 0), axis=2)
+        #     for l in range(self.gcn_layers):
+        #         Ax = tf.matmul(dep_matrix, hidden_states)
+        #         AxW = tf.layers.dense(Ax, self.gcn_dim)
+        #         AxW = AxW + tf.layers.dense(hidden_states, self.gcn_dim)
+        #         AxW = AxW / denom
+        #         gAxW = tf.nn.relu(AxW)
+        #         hidden_states = Dropout(gAxW, keep_prob=0.5) if l < self.gcn_layers - 1 else gAxW
 
-        de_out_dim = self.gcn_dim
-
-        with tf.variable_scope('entity_type_classification'):
-            entity_query = tf.get_variable('entity_query', [de_out_dim, 1],
-                                           initializer=tf.contrib.layers.xavier_initializer())
-            # 以句子中的词index建立索引
-            s_idx = tf.range(0, total_sents, 1, dtype=tf.int32)
-            head_index = tf.concat(
-                [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(head_pos, [total_sents, 1])], axis=-1)
-            tail_index = tf.concat(
-                [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(tail_pos, [total_sents, 1])], axis=-1)
-            # add null word vector
-            word_hidden_states = tf.concat([tf.zeros([total_sents, 1, de_out_dim]), hidden_states], axis=1)
-            # extract head/tail entity's hidden state. size (total_sents,hidden_dim)
-            head_repre_s = tf.gather_nd(word_hidden_states, head_index, name='head_entity_h_in_sentence')
-            tail_repre_s = tf.gather_nd(word_hidden_states, tail_index, name='tail_entity_h_in_sentence')
-
-            # 计算一个包中head实体的多个向量的att和
-            def getHeadRepre(num):
-                num_sents = num[1] - num[0]
-                bag_sents = head_repre_s[num[0]:num[1]]
-
-                head_att_weights = tf.nn.softmax(
-                    tf.reshape(tf.matmul(tf.tanh(bag_sents), entity_query), [num_sents]))
-
-                head_repre_ = tf.reshape(
-                    tf.matmul(
-                        tf.reshape(head_att_weights, [1, num_sents]),
-                        bag_sents
-                    ), [de_out_dim]
-                )
-                return head_repre_
-
-            # 计算一个包中tail实体的多个向量的att和
-            def getTailRepre(num):
-                num_sents = num[1] - num[0]
-                bag_sents = tail_repre_s[num[0]:num[1]]
-
-                tail_att_weights = tf.nn.softmax(
-                    tf.reshape(tf.matmul(tf.tanh(bag_sents), entity_query), [num_sents]))
-
-                tail_repre_ = tf.reshape(
-                    tf.matmul(
-                        tf.reshape(tail_att_weights, [1, num_sents]),
-                        bag_sents
-                    ), [de_out_dim]
-                )
-                return tail_repre_
-
-            # 一个batch中实体的向量表示 dimension(batchsize,rnn_output_dim)
-            head_repre_b = tf.map_fn(getHeadRepre, sent_num, dtype=tf.float32)
-            tail_repre_b = tf.map_fn(getTailRepre, sent_num, dtype=tf.float32)
-
+        # de_out_dim = self.gcn_dim
+        de_out_dim = 2*self.rnn_dim
         # word attention
         with tf.variable_scope('word_attention') as scope:
             word_query = tf.get_variable('word_query', [de_out_dim, 1],
@@ -521,8 +500,7 @@ class Model(ModelDesc):
             bag_repre = tf.map_fn(getSentenceAtt, sent_num, dtype=tf.float32)
 
         bag_repre = tf.concat([bag_repre, head_repre_b, tail_repre_b], axis=-1)
-        # de_out_dim = de_out_dim + 4 * self.rnn_dim
-        de_out_dim = 3 * de_out_dim
+        de_out_dim = de_out_dim + 4 * self.rnn_dim
 
         with tf.variable_scope('fully_connected_layer') as scope:
             w = tf.get_variable('w', [de_out_dim, RELATION_TYPE_CLASS],
@@ -538,7 +516,7 @@ class Model(ModelDesc):
         re_accuracy = tf.reduce_mean(re_accuracy_)
 
         with tf.variable_scope('entity_fully_connected_layer') as scope:
-            w_e = tf.get_variable('w', [self.gcn_dim, ENTITY_TYPE_CLASS],
+            w_e = tf.get_variable('w', [rnn_output_dim, ENTITY_TYPE_CLASS],
                                   initializer=tf.contrib.layers.xavier_initializer())
             b_e = tf.get_variable('b', initializer=np.zeros([ENTITY_TYPE_CLASS]).astype(np.float32))
             hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
@@ -707,7 +685,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-gpu', dest='gpu', default='0', help='gpu to use')
-    parser.add_argument('-l2', dest='l2', default=1e-5, type=float, help='l2 regularization')
+    parser.add_argument('-l2', dest='l2', default=1e-4, type=float, help='l2 regularization')
     parser.add_argument('-seed', dest='seed', default=1234, type=int, help='seed for randomization')
     parser.add_argument('-rnn_dim', dest='rnn_dim', default=200, type=int, help='hidden state dimension of Bi-RNN')
     parser.add_argument('-gcn_dim', dest='gcn_dim', default=400, type=int, help='hidden state dimension of GCN')
@@ -757,31 +735,31 @@ if __name__ == '__main__':
         # resume
         if args.previous_model:
             current_epoch = args.previous_model // step
-            load_path = './train_log/edr7:{}/model-{}'.format(name, args.previous_model)
+            load_path = './train_log/edr9:{}/model-{}'.format(name, args.previous_model)
             resume_config = resume_train(ds, dss, load_path, args, current_epoch, args.add_epochs)
             launch_train_with_config(resume_config, SimpleTrainer())
         else:
             current_step = step * args.pre_epochs
-            load_path = './train_log/edr7:{}/model-{}'.format(name, current_step)
+            load_path = './train_log/edr9:{}/model-{}'.format(name, current_step)
             resume_config = resume_train(ds, dss, load_path, args, args.pre_epochs, args.epochs)
             launch_train_with_config(resume_config, SimpleTrainer())
     elif args.command == 'eval':
         # predict
         if args.best_model:
             test_path = './mdb/test.mdb'
-            best_model_path = os.path.join('./train_log/edr7:{}/'.format(name), 'model-' + str(args.best_model))
+            best_model_path = os.path.join('./train_log/edr9:{}/'.format(name), 'model-' + str(args.best_model))
             p, r, f1, aur, p_, r_ = evaluate(Model(args), best_model_path, test_path, args.batch_size)
-            plotPRCurve(p_, r_, './train_log/edr7:{}'.format(name))
-            with open('./train_log/edr7:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
+            plotPRCurve(p_, r_, './train_log/edr9:{}'.format(name))
+            with open('./train_log/edr6:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
                 f.write('precision:\t{}\nrecall:\t{}\nf1:\t{}\nauc:\t{}'.format(p, r, f1, aur))
                 f.close()
         else:
-            with open('./train_log/edr7:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
+            with open('./train_log/edr9:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
                 for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs+args.add_epochs)]:
                     f.write(model + '\t')
                     for data in ['pn1', 'pn2', 'pn3']:
                         data_path = './mdb/{}.mdb'.format(data)
-                        p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr7:{}/'.format(name),
+                        p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr9:{}/'.format(name),
                                                                               'model-' + model), data_path, args.batch_size)
                         logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))
                         line = "{:.3f}\t{:.3f}\t{:.3f}\t".format(p100, p200, p300)

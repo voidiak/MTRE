@@ -707,7 +707,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-gpu', dest='gpu', default='0', help='gpu to use')
-    parser.add_argument('-l2', dest='l2', default=1e-5, type=float, help='l2 regularization')
+    parser.add_argument('-l2', dest='l2', default=1e-4, type=float, help='l2 regularization')
     parser.add_argument('-seed', dest='seed', default=1234, type=int, help='seed for randomization')
     parser.add_argument('-rnn_dim', dest='rnn_dim', default=200, type=int, help='hidden state dimension of Bi-RNN')
     parser.add_argument('-gcn_dim', dest='gcn_dim', default=400, type=int, help='hidden state dimension of GCN')
@@ -719,7 +719,6 @@ if __name__ == '__main__':
     parser.add_argument('-lr', dest='lr', default=0.001, type=float, help='learning rate')
     parser.add_argument('-pre_epochs', dest='pre_epochs', required=True, type=int, help='pretraining epochs')
     parser.add_argument('-epochs', dest='epochs', required=True, type=int, help='epochs to train/predict')
-    parser.add_argument('-batch_size', dest='batch_size', required=True, type=int, help='batch size')
     subparsers = parser.add_subparsers(title='command', dest='command')
     parser_pretrain = subparsers.add_parser('pretrain')
     parser_train = subparsers.add_parser('train')
@@ -731,58 +730,58 @@ if __name__ == '__main__':
     parser_evaluate.add_argument('-add_epochs', dest='add_epochs', default=0, type=int, help='epochs to continue')
     args = parser.parse_args()
     argdict = vars(args)
-    name = 'l2_{}_rnn_dim_{}_gcn_dim_{}_proj_dim_{}_dep_proj_dim_{}_coe_{}_lr_{}_pre_epochs_{}_epochs_{}_batch_size_{}' \
+    name = 'l2_{}_rnn_dim_{}_gcn_dim_{}_proj_dim_{}_dep_proj_dim_{}_coe_{}_lr_{}_pre_epochs_{}_epochs_{}' \
         .format(argdict['l2'], argdict['rnn_dim'], argdict['gcn_dim'], argdict['proj_dim'], argdict['dep_proj_dim'],
                 argdict['coe'],
-                argdict['lr'], argdict['pre_epochs'], argdict['epochs'], argdict['batch_size'])
+                argdict['lr'], argdict['pre_epochs'], argdict['epochs'])
     logger.auto_set_dir(action='k', name=name)
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
-    step = int(293142 / args.batch_size)
+    step = int(293142 / BATCH_SIZE)
     if args.command == 'pretrain':
         # set seed
         tf.set_random_seed(args.seed)
         random.seed(args.seed)
         np.random.seed(args.seed)
         # train
-        ds = getdata('./mdb/train.mdb', args.batch_size, True)
-        dss = getdata('./mdb/test.mdb', args.batch_size, False)
+        ds = getdata('./mdb/train.mdb', BATCH_SIZE, True)
+        dss = getdata('./mdb/test.mdb', BATCH_SIZE, False)
         config = get_config(ds, dss, args)
         launch_train_with_config(config, SimpleTrainer())
     elif args.command == 'train':
-        ds = getdata('./mdb/train.mdb', args.batch_size, True)
-        dss = getdata('./mdb/test.mdb', args.batch_size, False)
+        ds = getdata('./mdb/train.mdb', BATCH_SIZE, True)
+        dss = getdata('./mdb/test.mdb', BATCH_SIZE, False)
         # resume
         if args.previous_model:
             current_epoch = args.previous_model // step
-            load_path = './train_log/edr7:{}/model-{}'.format(name, args.previous_model)
+            load_path = './train_log/edr8:{}/model-{}'.format(name, args.previous_model)
             resume_config = resume_train(ds, dss, load_path, args, current_epoch, args.add_epochs)
             launch_train_with_config(resume_config, SimpleTrainer())
         else:
             current_step = step * args.pre_epochs
-            load_path = './train_log/edr7:{}/model-{}'.format(name, current_step)
+            load_path = './train_log/edr8:{}/model-{}'.format(name, current_step)
             resume_config = resume_train(ds, dss, load_path, args, args.pre_epochs, args.epochs)
             launch_train_with_config(resume_config, SimpleTrainer())
     elif args.command == 'eval':
         # predict
         if args.best_model:
             test_path = './mdb/test.mdb'
-            best_model_path = os.path.join('./train_log/edr7:{}/'.format(name), 'model-' + str(args.best_model))
-            p, r, f1, aur, p_, r_ = evaluate(Model(args), best_model_path, test_path, args.batch_size)
-            plotPRCurve(p_, r_, './train_log/edr7:{}'.format(name))
-            with open('./train_log/edr7:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
+            best_model_path = os.path.join('./train_log/edr8:{}/'.format(name), 'model-' + str(args.best_model))
+            p, r, f1, aur, p_, r_ = evaluate(Model(args), best_model_path, test_path, BATCH_SIZE)
+            plotPRCurve(p_, r_, './train_log/edr8:{}'.format(name))
+            with open('./train_log/edr8:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
                 f.write('precision:\t{}\nrecall:\t{}\nf1:\t{}\nauc:\t{}'.format(p, r, f1, aur))
                 f.close()
         else:
-            with open('./train_log/edr7:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
+            with open('./train_log/edr8:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
                 for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs+args.add_epochs)]:
                     f.write(model + '\t')
                     for data in ['pn1', 'pn2', 'pn3']:
                         data_path = './mdb/{}.mdb'.format(data)
-                        p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr7:{}/'.format(name),
-                                                                              'model-' + model), data_path, args.batch_size)
+                        p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr8:{}/'.format(name),
+                                                                              'model-' + model), data_path, BATCH_SIZE)
                         logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))
                         line = "{:.3f}\t{:.3f}\t{:.3f}\t".format(p100, p200, p300)
                         f.write(line)

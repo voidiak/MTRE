@@ -746,7 +746,7 @@ if __name__ == '__main__':
     elif args.command == 'eval':
         # predict
         if args.best_model:
-            test_path = './mdb/test_r.mdb'
+            test_path = './mdb/test.mdb'
             best_model_path = os.path.join('./train_log/edr6:{}/'.format(name), 'model-' + str(args.best_model))
             p, r, f1, aur, p_, r_ = evaluate(Model(args), best_model_path, test_path, args.batch_size)
             plotPRCurve(p_, r_, './train_log/edr6:{}'.format(name))
@@ -757,7 +757,7 @@ if __name__ == '__main__':
             with open('./train_log/edr6:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
                 for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs+args.add_epochs)]:
                     f.write(model + '\t')
-                    for data in ['pn1_r', 'pn2_r', 'pn3_r']:
+                    for data in ['pn1', 'pn2', 'pn3']:
                         data_path = './mdb/{}.mdb'.format(data)
                         p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr6:{}/'.format(name),
                                                                               'model-' + model), data_path, args.batch_size)
