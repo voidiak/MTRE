@@ -28,7 +28,7 @@ def get_embeddings(model, wrd_list, embed_dims):
 
 if __name__ == '__main__':
     embed_loc = '/data/MLRE-NG/glove/glove.6B.50d_word2vec.txt'
-    data = pickle.load(open('/data/MLRE-NG/dict.pkl', 'rb'))
+    data = pickle.load(open('/data/MLRE-NG/PKL/dict.pkl', 'rb'))
     savepath = '/data/MLRE-NG/embeddings.pkl'
     voc2id = data['voc2id']
 

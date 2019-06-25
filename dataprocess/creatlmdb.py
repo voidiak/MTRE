@@ -44,9 +44,11 @@ if __name__ == "__main__":
     args=parser.parse_args()
     if args.command == 'build':
         data = pickle.load(open(args.dataset, 'rb'))
+        print('{}:{}'.format(args.dataset,len(data)))
         ds=Raw(data)
         LMDBSerializer.save(ds,args.db)
     elif args.command == 'eval':
         data = pickle.load(open(args.dataset, 'rb'))
+        print('{}:{}'.format(args.dataset,len(data)))
         ds=Raw(data)
         LMDBSerializer.save(ds,args.db)

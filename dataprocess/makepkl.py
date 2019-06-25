@@ -400,6 +400,7 @@ def procData(data, split='train'):
         result.append(res)
     return result
 
+
 def splitBags(data, chunk_size):
     delbag = 0
     addbag = 0
@@ -411,11 +412,10 @@ def splitBags(data, chunk_size):
             chunks = getChunks(range(len(bag['X'])), chunk_size)
 
             for chunk in chunks:
-                res = {
-                'Y': bag['Y'],
-                'HeadLabel': bag['HeadLabel'],
-                'TailLabel': bag['TailLabel']
-                }
+                res={}
+                res['Y'] = bag['Y']
+                res['HeadLabel'] = bag['HeadLabel']
+                res['TailLabel'] = bag['TailLabel']
                 res['X'] = [bag['X'][j] for j in chunk]
                 res['Pos1'] = [bag['Pos1'][j] for j in chunk]
                 res['Pos2'] = [bag['Pos2'][j] for j in chunk]
@@ -430,25 +430,33 @@ def splitBags(data, chunk_size):
     print('deleted bag :{}  added bag :{}'.format(delbag, addbag))
     return data
 
-train_data_r = procData(data['train'], 'train')
-train_data = splitBags(train_data_r, 100)
-test_data_r = procData(data['test'], 'test')
-test_data = splitBags(test_data_r, 100)
 
-# param_data = {
-#     "voc2id": voc2id,
-#     "id2voc": id2voc,
-#     "max_pos": (MAX_POS + 1) * 2 + 1,
-#     "rel2id": rel2id,
-#     "dep2id": dep2id,
-#     'e_type2id': type2id
-# }
-print('writing data')
+train_data_r = procData(data['train'], 'train')
+print('train_data_r:{}'.format(len(train_data_r)))
 pickle.dump(train_data_r, open('/data/MLRE-NG/PKL/train_r.pkl', 'wb'))
-pickle.dump(test_data_r, open('/data/MLRE-NG/PKL/test_r.pkl', 'wb'))
+
+train_data = splitBags(train_data_r, 100)
+print('train_data:{}'.format(len(train_data)))
 pickle.dump(train_data, open('/data/MLRE-NG/PKL/train.pkl', 'wb'))
+
+test_data_r = procData(data['test'], 'test')
+print('test_data_r:{}'.format(len(test_data_r)))
+pickle.dump(test_data_r, open('/data/MLRE-NG/PKL/test_r.pkl', 'wb'))
+
+test_data = splitBags(test_data_r, 100)
+print('test_data:{}'.format(len(test_data)))
 pickle.dump(test_data, open('/data/MLRE-NG/PKL/test.pkl', 'wb'))
-# pickle.dump(param_data, open('/data/MLRE-NG/PKL/dict.pkl', 'wb'))
+
+param_data = {
+    "voc2id": voc2id,
+    "id2voc": id2voc,
+    "max_pos": (MAX_POS + 1) * 2 + 1,
+    "rel2id": rel2id,
+    "dep2id": dep2id,
+    'e_type2id': type2id
+}
+print('writing data')
+pickle.dump(param_data, open('/data/MLRE-NG/PKL/dict.pkl', 'wb'))
 
 
 
