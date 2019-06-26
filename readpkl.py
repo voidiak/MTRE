@@ -1,4 +1,5 @@
 import pickle
 from utils import *
-data=load_pickle('./embeddings.pkl')
-print(len(data))
+data=pickle.load(open('./embeddings.pkl','rb'))
+# d=data['voc2id']
+print(d)

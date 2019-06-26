@@ -115,7 +115,7 @@ class WarmupModel(ModelDesc):
             self.regularizer = None
         else:
             self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
-        self.embed_matrix = load_pickle(EMBED_LOC)
+        self.embed_matrix = pickle.load(open(EMBED_LOC, 'rb'))
 
     def inputs(self):
         return [tf.TensorSpec([None, None], tf.int32, 'input_x'),  # Xs
@@ -304,7 +304,7 @@ class Model(ModelDesc):
             self.regularizer = None
         else:
             self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
-        self.embed_matrix = load_pickle(EMBED_LOC)
+        self.embed_matrix = pickle.load(open(EMBED_LOC, 'rb'))
         self.gcn_layers = 2
         self.gcn_dim = params.gcn_dim
         self.coe = params.coe

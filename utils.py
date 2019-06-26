@@ -17,12 +17,6 @@ from pprint import pprint
 np.set_printoptions(precision=4)
 
 
-# 从pkl文件中读出embeddings
-def load_pickle(path):
-    with tf.gfile.GFile(path, 'rb') as f:
-        return pickle.load(f)
-
-
 # 检查路径下文件是否存在
 def checkFile(filename):
     return pathlib.Path(filename).is_file()

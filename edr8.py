@@ -116,7 +116,7 @@ class WarmupModel(ModelDesc):
             self.regularizer = None
         else:
             self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
-        self.embed_matrix = load_pickle(EMBED_LOC)
+        self.embed_matrix = pickle.load(open(EMBED_LOC,'rb'))
         self.gcn_layers = 2
         self.gcn_dim = params.gcn_dim
 
@@ -216,13 +216,14 @@ class WarmupModel(ModelDesc):
 
         # gcn encoding dependency tree structure
         dep_matrix = tf.nn.softmax(arc_scores)
+        gcn_matrix = tf.transpose(dep_matrix, [0, 2, 1])
 
         with tf.variable_scope('gcn_encoder') as scope:
-            denom = tf.expand_dims(tf.reduce_sum(dep_matrix, axis=2), axis=2) + 1
+            denom = tf.expand_dims(tf.reduce_sum(gcn_matrix, axis=2), axis=2) + 1
             # gcn_mask = tf.expand_dims(
             #     tf.equal((tf.reduce_sum(dep_matrix, axis=2) + tf.reduce_sum(dep_matrix, axis=1)), 0), axis=2)
             for l in range(self.gcn_layers):
-                Ax = tf.matmul(dep_matrix, hidden_states)
+                Ax = tf.matmul(gcn_matrix, hidden_states)
                 AxW = tf.layers.dense(Ax, self.gcn_dim)
                 AxW = AxW + tf.layers.dense(hidden_states, self.gcn_dim)
                 AxW = AxW / denom
@@ -325,7 +326,7 @@ class Model(ModelDesc):
             self.regularizer = None
         else:
             self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
-        self.embed_matrix = load_pickle(EMBED_LOC)
+        self.embed_matrix = pickle.load(open(EMBED_LOC, 'rb'))
         self.gcn_layers = 2
         self.gcn_dim = params.gcn_dim
         self.coe = params.coe
@@ -411,13 +412,14 @@ class Model(ModelDesc):
 
         # gcn encoding dependency tree structure
         dep_matrix = tf.nn.softmax(arc_scores)
+        gcn_matrix = tf.transpose(dep_matrix, [0, 2, 1])
 
         with tf.variable_scope('gcn_encoder') as scope:
-            denom = tf.expand_dims(tf.reduce_sum(dep_matrix, axis=2), axis=2) + 1
+            denom = tf.expand_dims(tf.reduce_sum(gcn_matrix, axis=2), axis=2) + 1
             # gcn_mask = tf.expand_dims(
             #     tf.equal((tf.reduce_sum(dep_matrix, axis=2) + tf.reduce_sum(dep_matrix, axis=1)), 0), axis=2)
             for l in range(self.gcn_layers):
-                Ax = tf.matmul(dep_matrix, hidden_states)
+                Ax = tf.matmul(gcn_matrix, hidden_states)
                 AxW = tf.layers.dense(Ax, self.gcn_dim)
                 AxW = AxW + tf.layers.dense(hidden_states, self.gcn_dim)
                 AxW = AxW / denom

@@ -115,7 +115,7 @@ class WarmupModel(ModelDesc):
             self.regularizer = None
         else:
             self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
-        self.embed_matrix = load_pickle(EMBED_LOC)
+        self.embed_matrix = pickle.load(open(EMBED_LOC,'rb'))
 
     def inputs(self):
         return [tf.TensorSpec([None, None], tf.int32, 'input_x'),  # Xs
@@ -304,7 +304,7 @@ class Model(ModelDesc):
             self.regularizer = None
         else:
             self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
-        self.embed_matrix = load_pickle(EMBED_LOC)
+        self.embed_matrix = pickle.load(open(EMBED_LOC,'rb'))
         self.gcn_layers = 2
         self.gcn_dim = params.gcn_dim
         self.coe = params.coe
@@ -441,13 +441,14 @@ class Model(ModelDesc):
 
         # gcn encoding dependency tree structure
         dep_matrix = tf.nn.softmax(arc_scores)
+        gcn_matrix = tf.transpose(dep_matrix, [0, 2, 1])
 
         with tf.variable_scope('gcn_encoder') as scope:
-            denom = tf.expand_dims(tf.reduce_sum(dep_matrix, axis=2), axis=2) + 1
+            denom = tf.expand_dims(tf.reduce_sum(gcn_matrix, axis=2), axis=2) + 1
             # gcn_mask = tf.expand_dims(
             #     tf.equal((tf.reduce_sum(dep_matrix, axis=2) + tf.reduce_sum(dep_matrix, axis=1)), 0), axis=2)
             for l in range(self.gcn_layers):
-                Ax = tf.matmul(dep_matrix, hidden_states)
+                Ax = tf.matmul(gcn_matrix, hidden_states)
                 AxW = tf.layers.dense(Ax, self.gcn_dim)
                 AxW = AxW + tf.layers.dense(hidden_states, self.gcn_dim)
                 AxW = AxW / denom
@@ -618,7 +619,7 @@ def evaluate(model, model_path, data_path, batchsize):
     y_scores = np.array([e[1:] for e in logit_list]).reshape((-1))
     y_true = np.array([e[1:] for e in label_list]).reshape((-1))
 
-    if data_path.startswith('./mdb/pn'):
+    if data_path.startswith('./rmdb/pn'):
         allprob = np.reshape(np.array(y_scores), (-1))
         allans = np.reshape(y_true, (-1))
         order = np.argsort(-allprob)
@@ -718,20 +719,20 @@ if __name__ == '__main__':
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
-    step = int(293142 / args.batch_size)
+    step = int(292453 / args.batch_size)
     if args.command == 'pretrain':
         # set seed
         tf.set_random_seed(args.seed)
         random.seed(args.seed)
         np.random.seed(args.seed)
         # train
-        ds = getdata('./mdb/train_r.mdb', args.batch_size, True)
-        dss = getdata('./mdb/test_r.mdb', args.batch_size, False)
+        ds = getdata('./rmdb/train_r.mdb', args.batch_size, True)
+        dss = getdata('./rmdb/test_r.mdb', args.batch_size, False)
         config = get_config(ds, dss, args)
         launch_train_with_config(config, SimpleTrainer())
     elif args.command == 'train':
-        ds = getdata('./mdb/train_r.mdb', args.batch_size, True)
-        dss = getdata('./mdb/test_r.mdb', args.batch_size, False)
+        ds = getdata('./rmdb/train_r.mdb', args.batch_size, True)
+        dss = getdata('./rmdb/test_r.mdb', args.batch_size, False)
         # resume
         if args.previous_model:
             current_epoch = args.previous_model // step
@@ -746,7 +747,7 @@ if __name__ == '__main__':
     elif args.command == 'eval':
         # predict
         if args.best_model:
-            test_path = './mdb/test_r.mdb'
+            test_path = './rmdb/test_r.mdb'
             best_model_path = os.path.join('./train_log/edr6_r:{}/'.format(name), 'model-' + str(args.best_model))
             p, r, f1, aur, p_, r_ = evaluate(Model(args), best_model_path, test_path, args.batch_size)
             plotPRCurve(p_, r_, './train_log/edr6_r:{}'.format(name))
@@ -758,7 +759,7 @@ if __name__ == '__main__':
                 for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs+args.add_epochs)]:
                     f.write(model + '\t')
                     for data in ['pn1_r', 'pn2_r', 'pn3_r']:
-                        data_path = './mdb/{}.mdb'.format(data)
+                        data_path = './rmdb/{}.mdb'.format(data)
                         p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr6_r:{}/'.format(name),
                                                                               'model-' + model), data_path, args.batch_size)
                         logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))
