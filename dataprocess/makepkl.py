@@ -433,19 +433,19 @@ def splitBags(data, chunk_size):
 
 train_data_r = procData(data['train'], 'train')
 print('train_data_r:{}'.format(len(train_data_r)))
-pickle.dump(train_data_r, open('/data/MLRE-NG/PKL/train_r.pkl', 'wb'))
+pickle.dump(train_data_r, open('/data/PKL/train_r.pkl', 'wb'))
 
 train_data = splitBags(train_data_r, 100)
 print('train_data:{}'.format(len(train_data)))
-pickle.dump(train_data, open('/data/MLRE-NG/PKL/train.pkl', 'wb'))
+pickle.dump(train_data, open('/data/PKL/train.pkl', 'wb'))
 
 test_data_r = procData(data['test'], 'test')
 print('test_data_r:{}'.format(len(test_data_r)))
-pickle.dump(test_data_r, open('/data/MLRE-NG/PKL/test_r.pkl', 'wb'))
+pickle.dump(test_data_r, open('/data/PKL/test_r.pkl', 'wb'))
 
 test_data = splitBags(test_data_r, 100)
 print('test_data:{}'.format(len(test_data)))
-pickle.dump(test_data, open('/data/MLRE-NG/PKL/test.pkl', 'wb'))
+pickle.dump(test_data, open('/data/PKL/test.pkl', 'wb'))
 
 param_data = {
     "voc2id": voc2id,
@@ -456,7 +456,7 @@ param_data = {
     'e_type2id': type2id
 }
 print('writing data')
-pickle.dump(param_data, open('/data/MLRE-NG/PKL/dict.pkl', 'wb'))
+pickle.dump(param_data, open('/data/PKL/dict.pkl', 'wb'))
 
 
 
@@ -512,12 +512,12 @@ def getPNdata(data):
 
 
 p1_r, p2_r, p3_r = getPNdata(test_data_r)
-pickle.dump(p1_r, open('/data/MLRE-NG/PKL/pn1_r.pkl', 'wb'))
-pickle.dump(p2_r, open('/data/MLRE-NG/PKL/pn2_r.pkl', 'wb'))
-pickle.dump(p3_r, open('/data/MLRE-NG/PKL/pn3_r.pkl', 'wb'))
+pickle.dump(p1_r, open('/data/PKL/pn1_r.pkl', 'wb'))
+pickle.dump(p2_r, open('/data/PKL/pn2_r.pkl', 'wb'))
+pickle.dump(p3_r, open('/data/PKL/pn3_r.pkl', 'wb'))
 
 p1_data, p2_data, p3_data = getPNdata(test_data)
-pickle.dump(p1_data, open('/data/MLRE-NG/PKL/pn1.pkl', 'wb'))
-pickle.dump(p2_data, open('/data/MLRE-NG/PKL/pn2.pkl', 'wb'))
-pickle.dump(p3_data, open('/data/MLRE-NG/PKL/pn3.pkl', 'wb'))
+pickle.dump(p1_data, open('/data/PKL/pn1.pkl', 'wb'))
+pickle.dump(p2_data, open('/data/PKL/pn2.pkl', 'wb'))
+pickle.dump(p3_data, open('/data/PKL/pn3.pkl', 'wb'))
 print('writing over')

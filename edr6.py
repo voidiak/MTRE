@@ -550,8 +550,8 @@ class Model(ModelDesc):
 def getdata(path, batchsize, isTrain):
     ds = LMDBSerializer.load(path, shuffle=isTrain)
     ds = getbatch(ds, batchsize, isTrain)
-    if isTrain:
-        ds = MultiProcessRunnerZMQ(ds, 2)
+    # if isTrain:
+    #     ds = MultiProcessRunnerZMQ(ds, 2)
     return ds
 
 

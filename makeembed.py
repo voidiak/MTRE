@@ -43,4 +43,4 @@ if __name__ == '__main__':
     print('embed size:')
     print(len(embed_init))
     with open(savepath, 'wb') as f:
-        pickle.dump(embed_init, f, -1)
+        pickle.dump(embed_init, f)
