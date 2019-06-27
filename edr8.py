@@ -18,8 +18,9 @@ ENTITY_TYPE_CLASS = 107
 RELATION_TYPE_CLASS = 53
 MAX_POS = (60 + 1) * 2 + 1
 BATCH_SIZE = 220
-EMBED_LOC = './embeddings.pkl'
+EMBED_LOC = '/data/MLRE-NG-archive/glove/glove.6B.50d_word2vec.txt'
 BASELINE_LOC = './baseline/'
+VOCAB_LOC = './vocab.pkl'
 
 
 class getbatch(ProxyDataFlow):
@@ -116,9 +117,11 @@ class WarmupModel(ModelDesc):
             self.regularizer = None
         else:
             self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
-        self.embed_matrix = pickle.load(open(EMBED_LOC,'rb'))
+        # self.embed_matrix = pickle.load(open(EMBED_LOC,'rb'))
         self.gcn_layers = 2
         self.gcn_dim = params.gcn_dim
+        self.vocab = pickle.load(open(VOCAB_LOC, 'rb'))
+
 
     def inputs(self):
         return [tf.TensorSpec([None, None], tf.int32, 'input_x'),  # Xs
@@ -143,8 +146,12 @@ class WarmupModel(ModelDesc):
     def build_graph(self, input_x, input_pos1, input_pos2, head_pos, tail_pos, dep_mask, x_len, seq_len, total_sents,
                     total_bags, sent_num, input_y, dep_y, head_label, tail_label, rec_dropout, dropout):
         with tf.variable_scope('word_embedding'):
-            word_embeddings = tf.get_variable('embeddings', initializer=self.embed_matrix, trainable=True,
-                                              regularizer=self.regularizer)
+            model = gensim.models.KeyedVectors.load_word2vec_format(EMBED_LOC, binary=False)
+            embed_init = get_embeddings(model, self.vocab, WORD_EMBED_DIM)
+            _word_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable= True, regularizer=self.regularizer)
+            #OOV pad
+            zero_pad = tf.zeros([1, WORD_EMBED_DIM])
+            word_embeddings = tf.concat([zero_pad, _word_embeddings], axis=0)
             pos1_embeddings = tf.get_variable('pos1_embeddings', [MAX_POS, POS_EMBED_DIM],
                                               initializer=tf.contrib.layers.xavier_initializer(), trainable=True,
                                               regularizer=self.regularizer)
@@ -217,6 +224,7 @@ class WarmupModel(ModelDesc):
         # gcn encoding dependency tree structure
         dep_matrix = tf.nn.softmax(arc_scores)
         gcn_matrix = tf.transpose(dep_matrix, [0, 2, 1])
+        gcn_matrix = gcn_matrix + tf.eye(seq_len)
 
         with tf.variable_scope('gcn_encoder') as scope:
             denom = tf.expand_dims(tf.reduce_sum(gcn_matrix, axis=2), axis=2) + 1
@@ -326,7 +334,8 @@ class Model(ModelDesc):
             self.regularizer = None
         else:
             self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
-        self.embed_matrix = pickle.load(open(EMBED_LOC, 'rb'))
+        # self.embed_matrix = pickle.load(open(EMBED_LOC, 'rb'))
+        self.vocab = pickle.load(open(VOCAB_LOC, 'rb'))
         self.gcn_layers = 2
         self.gcn_dim = params.gcn_dim
         self.coe = params.coe
@@ -355,8 +364,12 @@ class Model(ModelDesc):
                     total_bags, sent_num, input_y, dep_y, head_label, tail_label, rec_dropout, dropout):
 
         with tf.variable_scope('word_embedding'):
-            word_embeddings = tf.get_variable('embeddings', initializer=self.embed_matrix, trainable=True,
-                                              regularizer=self.regularizer)
+            model = gensim.models.KeyedVectors.load_word2vec_format(EMBED_LOC, binary=False)
+            embed_init = get_embeddings(model, self.vocab, WORD_EMBED_DIM)
+            _word_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable= True, regularizer=self.regularizer)
+            #OOV pad
+            zero_pad = tf.zeros([1, WORD_EMBED_DIM])
+            word_embeddings = tf.concat([zero_pad, _word_embeddings], axis=0)
             pos1_embeddings = tf.get_variable('pos1_embeddings', [MAX_POS, POS_EMBED_DIM],
                                               initializer=tf.contrib.layers.xavier_initializer(), trainable=True,
                                               regularizer=self.regularizer)
@@ -413,6 +426,7 @@ class Model(ModelDesc):
         # gcn encoding dependency tree structure
         dep_matrix = tf.nn.softmax(arc_scores)
         gcn_matrix = tf.transpose(dep_matrix, [0, 2, 1])
+        gcn_matrix = gcn_matrix + tf.eye(seq_len)
 
         with tf.variable_scope('gcn_encoder') as scope:
             denom = tf.expand_dims(tf.reduce_sum(gcn_matrix, axis=2), axis=2) + 1
@@ -573,8 +587,8 @@ class Model(ModelDesc):
 def getdata(path, batchsize, isTrain):
     ds = LMDBSerializer.load(path, shuffle=isTrain)
     ds = getbatch(ds, batchsize, isTrain)
-    if isTrain:
-        ds = MultiProcessRunnerZMQ(ds, 2)
+    # if isTrain:
+    #     ds = MultiProcessRunnerZMQ(ds, 2)
     return ds
 
 
@@ -721,6 +735,7 @@ if __name__ == '__main__':
     parser.add_argument('-lr', dest='lr', default=0.001, type=float, help='learning rate')
     parser.add_argument('-pre_epochs', dest='pre_epochs', required=True, type=int, help='pretraining epochs')
     parser.add_argument('-epochs', dest='epochs', required=True, type=int, help='epochs to train/predict')
+    parser.add_argument('-note', dest='note',default='', help='other args')
     subparsers = parser.add_subparsers(title='command', dest='command')
     parser_pretrain = subparsers.add_parser('pretrain')
     parser_train = subparsers.add_parser('train')
@@ -732,10 +747,14 @@ if __name__ == '__main__':
     parser_evaluate.add_argument('-add_epochs', dest='add_epochs', default=0, type=int, help='epochs to continue')
     args = parser.parse_args()
     argdict = vars(args)
-    name = 'l2_{}_rnn_dim_{}_gcn_dim_{}_proj_dim_{}_dep_proj_dim_{}_coe_{}_lr_{}_pre_epochs_{}_epochs_{}' \
+    name = 'l2_{}_rnn_dim_{}_gcn_dim_{}_proj_dim_{}_dep_proj_dim_{}_coe_{}_lr_{}_pre_epochs_{}_epochs_{}_{}' \
         .format(argdict['l2'], argdict['rnn_dim'], argdict['gcn_dim'], argdict['proj_dim'], argdict['dep_proj_dim'],
                 argdict['coe'],
-                argdict['lr'], argdict['pre_epochs'], argdict['epochs'])
+                argdict['lr'], argdict['pre_epochs'], argdict['epochs'], argdict['note'])
+    # name = 'l2_{}_rnn_dim_{}_gcn_dim_{}_proj_dim_{}_dep_proj_dim_{}_coe_{}_lr_{}_pre_epochs_{}_epochs_{}' \
+    #     .format(argdict['l2'], argdict['rnn_dim'], argdict['gcn_dim'], argdict['proj_dim'], argdict['dep_proj_dim'],
+    #             argdict['coe'],
+    #             argdict['lr'], argdict['pre_epochs'], argdict['epochs'])
     logger.auto_set_dir(action='k', name=name)
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"

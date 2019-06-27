@@ -249,19 +249,28 @@ def read_file(file_path):
                 len_limit = min(100, sen_length) + 1
                 dep = []
 
-                if len(dep_head) == len(dep_label):
-                    for i in range(sen_length):
-                        if dep_head[i] < len_limit and dep_label[i] != 40:
-                            if (dep_head[i] in mapped_pos) or (i in entity_pos):
-                                dep.append(dep_head[i])
-                                dep_mask.append(1)
-                                #TO-DO:加入dependency arc label标签arc_rel
-                            else:
-                                dep.append(0)
-                                dep_mask.append(0)
-                        else:
-                            dep.append(0)
-                            dep_mask.append(0)
+                # masked dependency label
+                # if len(dep_head) == len(dep_label):
+                #     for i in range(sen_length):
+                #         if dep_head[i] < len_limit and dep_label[i] != 40:
+                #             if (dep_head[i] in mapped_pos) or (i in entity_pos):
+                #                 dep.append(dep_head[i])
+                #                 dep_mask.append(1)
+                #                 #TO-DO:加入dependency arc label标签arc_rel
+                #             else:
+                #                 dep.append(0)
+                #                 dep_mask.append(0)
+                #         else:
+                #             dep.append(0)
+                #             dep_mask.append(0)
+
+                for i in range(sen_length):
+                    if dep_head[i] < len_limit and dep_label[i] != 40:
+                        dep.append(dep_head[i])
+                        dep_mask.append(1)
+                    else:
+                        dep.append(0)
+                        dep_mask.append(0)
 
                 dep_list.append(dep)
                 wrds_list.append(wrds)
@@ -347,8 +356,8 @@ vocab.append('UNK')
 """*******************************建立word 和 id之间的映射表*********************************"""
 
 
-# 词到id的字典
-def getIdMap(vals, begin_idx=0):
+# 词到id的字典 编号从1开始，留下OOV词汇的0位置
+def getIdMap(vals, begin_idx=1):
     ele2id = {}
     for id, ele in enumerate(vals):
         ele2id[ele] = id + begin_idx

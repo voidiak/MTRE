@@ -1,4 +1,4 @@
-from utils import *
+from helper1 import *
 from six.moves import range
 from tensorpack import *
 from tensorpack.tfutils.gradproc import GlobalNormClip, SummaryGradient
@@ -632,7 +632,7 @@ if __name__ == '__main__':
     parser.add_argument('-data', dest='dataset', default='./params.pkl', help='params to use')
     parser.add_argument('-gpu', dest='gpu', default='0', help='gpu to use')
     parser.add_argument('-pos_dim', dest='pos_dim', default=10, type=int, help='dimension of positional embedding')
-    parser.add_argument('-l2', dest='l2', default=0.001, type=float, help='l2 regularization')
+    parser.add_argument('-l2', dest='l2', default=0.0001, type=float, help='l2 regularization')
     parser.add_argument('-embed_loc', dest='embed_loc', default='./glove/glove.6B.50d_word2vec.txt',
                         help='embed location')
     parser.add_argument('-word_embed_dim', dest='word_embed_dim', default=50, type=int, help='word embed dimension')
@@ -642,7 +642,7 @@ if __name__ == '__main__':
     parser.add_argument('-seed', dest='seed', default=1234, type=int, help='seed for randomization')
     parser.add_argument('-rnn_dim', dest='rnn_dim', default=200, type=int, help='hidden state dimension of Bi-RNN')
     parser.add_argument('-gcn_dim', dest='gcn_dim', default=400, type=int, help='hidden state dimension of GCN')
-    parser.add_argument('-projection_size', dest='projection_size', default=128, type=int,
+    parser.add_argument('-projection_size', dest='projection_size', default=256, type=int,
                         help='projection size for LSTMs and hidden layers')
     parser.add_argument('-depparse_projection_size', dest='depparse_projection_size', default=64, type=int,
                         help='size of the representations used in the bilinear classifier for parsing')

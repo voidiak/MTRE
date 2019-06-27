@@ -1,5 +1,6 @@
 from tensorpack import *
 import numpy as np
+from utils import *
 class getbatch(ProxyDataFlow):
 
     def __init__(self, ds, batch, isTrain):
@@ -86,9 +87,12 @@ class getbatch(ProxyDataFlow):
         return temp
 
 if __name__ == '__main__':
-    path='/data/cnm/train.mdb'
+    path='/data/mdb/train.mdb'
     ds = LMDBSerializer.load(path, shuffle=True)
     dse = getbatch(ds, 2, True)
     dse.reset_state()
     a = dse.__iter__()
-    print(next(a))
+    b = next(a)
+    print('Xs:{}\n Pos1s:{}\n Pos2s:{}\n HeadPoss:{}\n TailPoss:{}\n DepMasks:{}\n X_len:{}\n max_seq_len:{}\n '
+          'total_sents:{}\n total_bags:{}\n SentNum:{}\n ReLabels:{}\n DepLabels:{}\n HeadLabels:{}\n TailLabels:{}\n'.
+          format(b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7],b[8],b[9],b[10],b[11],b[12],b[13],b[14]))
