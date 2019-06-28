@@ -708,8 +708,8 @@ if __name__ == '__main__':
     parser.add_argument('-coe', dest='coe', default=0.3, type=float, help='value for loss addition')
     parser.add_argument('-lr', dest='lr', default=0.001, type=float, help='learning rate')
     parser.add_argument('-pre_epochs', dest='pre_epochs', required=True, type=int, help='pretraining epochs')
-    parser.add_argument('-epochs', dest='epochs', required=True, type=int, help='epochs to train/predict')
-    parser.add_argument('-batch_size', dest='batch_size', required=True, type=int, help='batch size')
+    parser.add_argument('-epochs', dest='epochs', default=10, type=int, help='epochs to train/predict')
+    parser.add_argument('-batch_size', dest='batch_size', default=220, type=int, help='batch size')
     subparsers = parser.add_subparsers(title='command', dest='command')
     parser_pretrain = subparsers.add_parser('pretrain')
     parser_train = subparsers.add_parser('train')
@@ -721,10 +721,10 @@ if __name__ == '__main__':
     parser_evaluate.add_argument('-add_epochs', dest='add_epochs', default=0, type=int, help='epochs to continue')
     args = parser.parse_args()
     argdict = vars(args)
-    name = 'l2_{}_rnn_dim_{}_gcn_dim_{}_proj_dim_{}_dep_proj_dim_{}_coe_{}_lr_{}_pre_epochs_{}_epochs_{}_batch_size_{}' \
+    name = 'l2_{}_rnn_dim_{}_gcn_dim_{}_proj_dim_{}_dep_proj_dim_{}_coe_{}_lr_{}_pre_epochs_{}_epochs_{}_batch_size_{}_seed_{}' \
         .format(argdict['l2'], argdict['rnn_dim'], argdict['gcn_dim'], argdict['proj_dim'], argdict['dep_proj_dim'],
                 argdict['coe'],
-                argdict['lr'], argdict['pre_epochs'], argdict['epochs'], argdict['batch_size'])
+                argdict['lr'], argdict['pre_epochs'], argdict['epochs'], argdict['batch_size'], argdict['seed'])
     logger.auto_set_dir(action='k', name=name)
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -767,6 +767,7 @@ if __name__ == '__main__':
                 f.close()
         else:
             with open('./train_log/edr6:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
+                f.write(name+'\n')
                 for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs+args.add_epochs)]:
                     f.write(model + '\t')
                     for data in ['pn1', 'pn2', 'pn3']:
