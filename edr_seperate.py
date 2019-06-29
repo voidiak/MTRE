@@ -6,13 +6,11 @@ from tensorpack import ProxyDataFlow
 from tensorpack.dataflow import LMDBSerializer, MultiProcessRunnerZMQ
 from tensorpack.tfutils import optimizer
 from tensorpack.utils import logger
-from sklearn.metrics import precision_recall_curve, average_precision_score
-import seaborn
+from sklearn.metrics import precision_recall_fscore_support, precision_recall_curve, average_precision_score
 import matplotlib
 import gensim
-# matplotlib.use('agg')
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
-plt.style.use('ggplot')
 
 WORD_EMBED_DIM = 50
 POS_EMBED_DIM = 5
@@ -575,12 +573,12 @@ def get_config(ds_train, ds_test, params):
             ModelSaver(),
             StatMonitorParamSetter('learning_rate', 'total_loss',
                                    lambda x: x * 0.2, 0, 5),
-            # PeriodicTrigger(
-            #     InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('ner_accu', 'ner_accuracy'),
-            #                               ClassificationError('dep_accu', 'dep_accuracy')]),
-            #     every_k_epochs=1),
-            # MovingAverageSummary(),
-            # MergeAllSummaries(),
+            PeriodicTrigger(
+                InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('ner_accu', 'ner_accuracy'),
+                                          ClassificationError('dep_accu', 'dep_accuracy')]),
+                every_k_epochs=1),
+            MovingAverageSummary(),
+            MergeAllSummaries(),
         ],
         model=WarmupModel(params),
         max_epoch=params.pre_epochs,
@@ -597,12 +595,12 @@ def resume_train(ds_train, ds_test, model_path, params, current_epoch, add_epoch
             ModelSaver(),
             StatMonitorParamSetter('learning_rate', 'total_loss',
                                    lambda x: x * 0.2, 0, 5),
-            # PeriodicTrigger(
-            #     InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('re_accu', 'accuracy')]),
-            #     every_k_epochs=1),
-            # MovingAverageSummary(),
-            # MergeAllSummaries(),
-            # GPUMemoryTracker(),
+            PeriodicTrigger(
+                InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('re_accu', 'accuracy')]),
+                every_k_epochs=1),
+            MovingAverageSummary(),
+            MergeAllSummaries(),
+            GPUMemoryTracker(),
         ],
         model=Model(params),
         max_epoch=current_epoch + add_epochs,
@@ -701,9 +699,9 @@ def plotPRCurve(precision, recall, dir):
     plt.xlim([0.0, 0.45])
 
     for i, baseline in enumerate(base_list):
-        precision_b = np.load(BASELINE_LOC + baseline + '/precision.npy')
-        recall_b = np.load(BASELINE_LOC + baseline + '/recall.npy')
-        plt.plot(recall_b, precision_b, color=color[i], label=baseline, lw=1, marker=marker[i], markevery=0.1, ms=6)
+        precision = np.load(BASELINE_LOC + baseline + '/precision.npy')
+        recall = np.load(BASELINE_LOC + baseline + '/recall.npy')
+        plt.plot(recall, precision, color=color[i], label=baseline, lw=1, marker=marker[i], markevery=0.1, ms=6)
 
     plt.xlabel('Recall', fontsize=14)
     plt.ylabel('Precision', fontsize=14)
@@ -782,7 +780,6 @@ if __name__ == '__main__':
             best_model_path = os.path.join('./train_log/edr:{}/'.format(name), 'model-' + str(args.best_model))
             p, r, f1, aur, p_, r_ = evaluate(Model(args), best_model_path, test_path, args.batch_size)
             plotPRCurve(p_, r_, './train_log/edr:{}'.format(name))
-            pickle.dump({'precision':p_, 'recall':r_}, open('./train_log/edr:{}/p_r.pkl'.format(name), 'wb'))
             with open('./train_log/edr:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
                 f.write('precision:\t{}\nrecall:\t{}\nf1:\t{}\nauc:\t{}\n'.format(p, r, f1, aur))
                 f.write(name+'\n')
