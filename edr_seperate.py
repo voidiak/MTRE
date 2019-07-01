@@ -453,6 +453,7 @@ class Model(ModelDesc):
         # gcn encoding dependency tree structure
         dep_matrix = tf.nn.softmax(arc_scores)
         gcn_matrix = tf.transpose(dep_matrix, [0, 2, 1])
+        gcn_matrix = gcn_matrix + tf.eye(seq_len)
 
         with tf.variable_scope('gcn_encoder') as scope:
             denom = tf.expand_dims(tf.reduce_sum(gcn_matrix, axis=2), axis=2) + 1

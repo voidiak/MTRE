@@ -578,12 +578,12 @@ def get_config(ds_train, ds_test, params):
             ModelSaver(),
             StatMonitorParamSetter('learning_rate', 'total_loss',
                                    lambda x: x * 0.2, 0, 5),
-            # PeriodicTrigger(
-            #     InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('ner_accu', 'ner_accuracy'),
-            #                               ClassificationError('dep_accu', 'dep_accuracy')]),
-            #     every_k_epochs=1),
-            # MovingAverageSummary(),
-            # MergeAllSummaries(),
+            PeriodicTrigger(
+                InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('ner_accu', 'ner_accuracy'),
+                                          ClassificationError('dep_accu', 'dep_accuracy')]),
+                every_k_epochs=1),
+            MovingAverageSummary(),
+            MergeAllSummaries(),
         ],
         model=WarmupModel(params),
         max_epoch=params.pre_epochs,
@@ -600,11 +600,11 @@ def resume_train(ds_train, ds_test, model_path, params, current_epoch, add_epoch
             ModelSaver(),
             StatMonitorParamSetter('learning_rate', 'total_loss',
                                    lambda x: x * 0.2, 0, 5),
-            # PeriodicTrigger(
-            #     InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('re_accu', 'accuracy')]),
-            #     every_k_epochs=1),
-            # MovingAverageSummary(),
-            # MergeAllSummaries(),
+            PeriodicTrigger(
+                InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('re_accu', 'accuracy')]),
+                every_k_epochs=1),
+            MovingAverageSummary(),
+            MergeAllSummaries(),
             # GPUMemoryTracker(),
         ],
         model=Model(params),
@@ -696,10 +696,11 @@ def curve(y_scores, y_true, num=2000):
         recalls.append(recall)
 
     ppp_num = len(y_scores) // 10
-    correct_num=0.0
+    ppp_result=0.0
     for i in order[:ppp_num]:
-        correct_num += 1.0 if (y_true[i] == 1) else 0
-    ppp_result = correct_num / ppp_num
+        # correct_num += 1.0 if (y_true[i] == 1) else 0
+        ppp_result+=y_scores[i]
+    ppp_result = ppp_result / ppp_num
     logger.info('P@10%:\t{}'.format(ppp_result))
 
     return np.array(precisions), np.array(recalls), ppp_result
@@ -775,7 +776,7 @@ if __name__ == '__main__':
     parser_evaluate.add_argument('-add_epochs', dest='add_epochs', default=0, type=int, help='epochs to continue')
     args = parser.parse_args()
     argdict = vars(args)
-    name = 'seed_{}'.format(argdict['seed'])
+    name = 'seed_{}_rnn_dim_{}'.format(argdict['seed'], argdict['rnn_dim'])
     logger.auto_set_dir(action='k', name=name)
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"

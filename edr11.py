@@ -148,11 +148,11 @@ class WarmupModel(ModelDesc):
         with tf.variable_scope('word_embedding'):
             model = gensim.models.KeyedVectors.load_word2vec_format(EMBED_LOC, binary=False)
             embed_init = get_embeddings(model, self.vocab, WORD_EMBED_DIM)
-            _word_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable=True,
-                                               regularizer=self.regularizer)
-            # OOV pad
-            zero_pad = tf.zeros([1, WORD_EMBED_DIM])
-            word_embeddings = tf.concat([zero_pad, _word_embeddings], axis=0)
+            #OOV pad
+            zero_pad = tf.random.normal([1, WORD_EMBED_DIM])
+            _word_embeddings = tf.concat([zero_pad, embed_init], axis=0)
+            word_embeddings = tf.get_variable('embeddings', initializer=_word_embeddings, trainable= True, regularizer=self.regularizer)
+
             pos1_embeddings = tf.get_variable('pos1_embeddings', [MAX_POS, POS_EMBED_DIM],
                                               initializer=tf.contrib.layers.xavier_initializer(), trainable=True,
                                               regularizer=self.regularizer)
@@ -368,10 +368,10 @@ class Model(ModelDesc):
         with tf.variable_scope('word_embedding'):
             model = gensim.models.KeyedVectors.load_word2vec_format(EMBED_LOC, binary=False)
             embed_init = get_embeddings(model, self.vocab, WORD_EMBED_DIM)
-            _word_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable= True, regularizer=self.regularizer)
             #OOV pad
-            zero_pad = tf.zeros([1, WORD_EMBED_DIM])
-            word_embeddings = tf.concat([zero_pad, _word_embeddings], axis=0)
+            zero_pad = tf.random.normal([1, WORD_EMBED_DIM])
+            _word_embeddings = tf.concat([zero_pad, embed_init], axis=0)
+            word_embeddings = tf.get_variable('embeddings', initializer=_word_embeddings, trainable= True, regularizer=self.regularizer)
             pos1_embeddings = tf.get_variable('pos1_embeddings', [MAX_POS, POS_EMBED_DIM],
                                               initializer=tf.contrib.layers.xavier_initializer(), trainable=True,
                                               regularizer=self.regularizer)
@@ -609,6 +609,7 @@ def get_config(ds_train, ds_test, params):
             MovingAverageSummary(),
             MergeAllSummaries(),
         ],
+        steps_per_epoch= 20,
         model=WarmupModel(params),
         max_epoch=params.pre_epochs,
     )
@@ -631,6 +632,7 @@ def resume_train(ds_train, ds_test, model_path, params, current_epoch, add_epoch
             MergeAllSummaries(),
             GPUMemoryTracker(),
         ],
+        steps_per_epoch=20,
         model=Model(params),
         max_epoch=current_epoch + add_epochs,
     )
@@ -780,32 +782,31 @@ if __name__ == '__main__':
         # resume
         if args.previous_model:
             current_epoch = args.previous_model // step
-            load_path = './train_log/edr11:{}/model-{}'.format(name, args.previous_model)
+            load_path = './train_log/edr10:{}/model-{}'.format(name, args.previous_model)
             resume_config = resume_train(ds, dss, load_path, args, current_epoch, args.add_epochs)
             launch_train_with_config(resume_config, SimpleTrainer())
         else:
             current_step = step * args.pre_epochs
-            load_path = './train_log/edr11:{}/model-{}'.format(name, current_step)
+            load_path = './train_log/edr10:{}/model-{}'.format(name, current_step)
             resume_config = resume_train(ds, dss, load_path, args, args.pre_epochs, args.epochs)
             launch_train_with_config(resume_config, SimpleTrainer())
     elif args.command == 'eval':
         # predict
         if args.best_model:
             test_path = './mdb/test.mdb'
-            best_model_path = os.path.join('./train_log/edr11:{}/'.format(name), 'model-' + str(args.best_model))
+            best_model_path = os.path.join('./train_log/edr10:{}/'.format(name), 'model-' + str(args.best_model))
             p, r, f1, aur, p_, r_ = evaluate(Model(args), best_model_path, test_path, BATCH_SIZE)
-            plotPRCurve(p_, r_, './train_log/edr11:{}'.format(name))
-            with open('./train_log/edr11:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
+            plotPRCurve(p_, r_, './train_log/edr10:{}'.format(name))
+            with open('./train_log/edr10:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
                 f.write('precision:\t{}\nrecall:\t{}\nf1:\t{}\nauc:\t{}'.format(p, r, f1, aur))
                 f.close()
         else:
-            with open('./train_log/edr11:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
-                f.write(name+'\t')
+            with open('./train_log/edr10:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
                 for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs+args.add_epochs)]:
                     f.write(model + '\t')
                     for data in ['pn1', 'pn2', 'pn3']:
                         data_path = './mdb/{}.mdb'.format(data)
-                        p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr11:{}/'.format(name),
+                        p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr10:{}/'.format(name),
                                                                               'model-' + model), data_path, BATCH_SIZE)
                         logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))
                         line = "{:.3f}\t{:.3f}\t{:.3f}\t".format(p100, p200, p300)

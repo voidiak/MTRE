@@ -51,8 +51,10 @@ class getbatch(ProxyDataFlow):
             else:
                 dropout = 0.8
                 rec_dropout = 0.8
-            yield [Xs, Pos1s, Pos2s, HeadPoss, TailPoss, DepMasks, X_len, max_seq_len, total_sents, total_bags, SentNum,
-                   ReLabels, DepLabels, HeadLabels, TailLabels, rec_dropout, dropout]
+            # yield [Xs, Pos1s, Pos2s, HeadPoss, TailPoss, DepMasks, X_len, max_seq_len, total_sents, total_bags, SentNum,
+            #        ReLabels, DepLabels, HeadLabels, TailLabels, rec_dropout, dropout]
+            max_pos=max(max(HeadPoss),max(TailPoss))
+            yield  max_pos
 
     def getOneHot(self, Y, re_num_class):
         temp = np.zeros((len(Y), re_num_class), np.int32)
@@ -87,12 +89,18 @@ class getbatch(ProxyDataFlow):
         return temp
 
 if __name__ == '__main__':
-    path='/data/mdb/train.mdb'
-    ds = LMDBSerializer.load(path, shuffle=True)
-    dse = getbatch(ds, 2, True)
+    path1='/data/MLRE-NG/mdb/train.mdb'
+    path2='/data/mdb/test.mdb'
+    ds = LMDBSerializer.load(path1, shuffle=True)
+    dse = getbatch(ds, 200, True)
     dse.reset_state()
     a = dse.__iter__()
-    b = next(a)
-    print('Xs:{}\n Pos1s:{}\n Pos2s:{}\n HeadPoss:{}\n TailPoss:{}\n DepMasks:{}\n X_len:{}\n max_seq_len:{}\n '
-          'total_sents:{}\n total_bags:{}\n SentNum:{}\n ReLabels:{}\n DepLabels:{}\n HeadLabels:{}\n TailLabels:{}\n'.
-          format(b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7],b[8],b[9],b[10],b[11],b[12],b[13],b[14]))
+    count=0
+    for b in a:
+        # print('HeadPoss:{}\tTailPoss:{}'.format(b[0], b[1]))
+        if b>100:
+            count+=1
+    print(count)
+    # print('Xs:{}\n Pos1s:{}\n Pos2s:{}\n HeadPoss:{}\n TailPoss:{}\n DepMasks:{}\n X_len:{}\n max_seq_len:{}\n '
+    #       'total_sents:{}\n total_bags:{}\n SentNum:{}\n ReLabels:{}\n DepLabels:{}\n HeadLabels:{}\n TailLabels:{}\n'.
+    #       format(b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7],b[8],b[9],b[10],b[11],b[12],b[13],b[14]))

@@ -127,13 +127,11 @@ def read_file(file_path):
                             for head_off in head_start_off]
                 tail_off = [(tail_off, tail_off + len(bag["tail"]), "tail")
                             for tail_off in tail_start_off]
-
                 if head_off == [] or tail_off == []:
                     # print('head tail off null')
                     # print('{} | {} | {}'.format(bag['head'], bag['tail'], sent['sent']))
                     # pdb.set_trace()
                     continue
-
                 spans = [head_off[0]] + [tail_off[0]]
                 off_begin, off_end, _ = zip(*spans)
 
@@ -141,7 +139,6 @@ def read_file(file_path):
 
                 tok_idx = 1
                 head_pos, tail_pos = None, None
-
                 for s_n, sentence in enumerate(sent["nlp"]["sentences"]):
                     i, tokens = 0, sentence["tokens"]
                     while i < len(tokens):
@@ -168,14 +165,12 @@ def read_file(file_path):
 
                             i += 1
                             tok_idx += 1
-
                 if head_pos == None or tail_pos == None:
                     # print('Skipped entry!!')
                     # print('{} | {} | {}'.format(bag['head'], bag['tail'], sent['sent']))
                     null_sentence += 1
                     # pdb.set_trace()
                     continue
-
                 wrds = ['_'.join(e).lower() for e in tid2wrd.values()]
                 pos1 = [i - head_pos for i in range(tok_idx - 1)]  # tok_idx = (number of tokens + 1)
                 pos2 = [i - tail_pos for i in range(tok_idx - 1)]
@@ -190,9 +185,13 @@ def read_file(file_path):
                 # 当headpos超出max length的时候，置为0
                 mapped_head_pos = mappos(head_pos)
                 mapped_tail_pos = mappos(tail_pos)
-
+                # entity_max_pos = max(mapped_head_pos, mapped_tail_pos)
+                # if entity_max_pos>100:
+                #     print('Skipped entry!!')
+                #     print('{} | {} | {}'.format(bag['head'], bag['tail'], sent['sent']))
+                #     pdb.set_trace()
+                #     continue
                 dep_mask = []  # 用于dependency parsing中标记词语位置的mask
-
                 # 构建dependency label list
                 dep_head_dict = ddict(int)
                 dep_label_dict = ddict(str)
@@ -202,7 +201,6 @@ def read_file(file_path):
                 for i, item in enumerate(sent['sent_dep']):
                     word_id2dep_head[item['dependent'] - 1] = item['governor']
                     word_id2dep_label[item['dependent'] - 1] = item['dep']
-
                 # 按word分词序列逐个修改dep_head
                 for s_n, sentence in enumerate(sent["nlp"]["sentences"]):
                     i, j, tokens = 0, 0, sentence["tokens"]
@@ -242,14 +240,10 @@ def read_file(file_path):
                 # 将dep_head_dict和dep_label_dict转成list
                 dep_head = [item for item in dep_head_dict.values()]
                 dep_label = [item for item in dep_label_dict.values()]
-
                 sen_length = len(dep_head)
-
-
-                # mapped_pos = (mapped_head_pos, mapped_tail_pos)#由于dep_head的索引是从1开始计数，所以正好和map后的entity pos一致
+                mapped_pos = (mapped_head_pos, mapped_tail_pos)#由于dep_head的索引是从1开始计数，所以正好和map后的entity pos一致
                 len_limit = min(100, sen_length) + 1
                 dep = []
-
                 # masked dependency label
                 # if len(dep_head) == len(dep_label):
                 #     for i in range(sen_length):
@@ -264,7 +258,6 @@ def read_file(file_path):
                 #         else:
                 #             dep.append(0)
                 #             dep_mask.append(0)
-
                 for i in range(sen_length):
                     if dep_head[i] < len_limit and dep_label[i] != 40:
                         dep.append(dep_head[i])
@@ -272,13 +265,15 @@ def read_file(file_path):
                     else:
                         dep.append(0)
                         dep_mask.append(0)
-
                 dep_list.append(dep)
                 wrds_list.append(wrds)
                 pos1_list.append(pos1)
                 pos2_list.append(pos2)
-                head_pos_list.append(mapped_head_pos)
-                tail_pos_list.append(mapped_tail_pos)
+                head_pos_list.append(head_pos)
+                tail_pos_list.append(tail_pos)
+                if max(head_pos_list)>100:
+                    print(head_pos_list)
+                    pdb.set_trace()
                 dep_mask_list.append(dep_mask)
                 count += 1
 
@@ -290,6 +285,13 @@ def read_file(file_path):
                 head_label[i] = 1
             for i in entity2typeid[bag['tail_id']]:
                 tail_label[i] = 1
+
+            entity_max_pos = max(max(head_pos_list), max(tail_pos_list))
+            if entity_max_pos>100:
+                print('Skipped entry!!')
+                print('{} | {} | {}'.format(bag['head'], bag['tail'], sent['sent']))
+                pdb.set_trace()
+                continue
 
             temp.append({
                 'head': bag['head'],
@@ -314,220 +316,3 @@ data['train'] = read_file("/data/MLRE/data/train_bags.json")
 data['test'] = read_file("/data/MLRE/data/test_bags.json")
 
 print('Bags processed:Train:{},Test:{}'.format(len(data['train']), len(data['test'])))
-
-"""*************************************删除离群数据****************************************"""
-
-del_cnt = 0
-MAX_WORDS = 100
-for dtype in ['train', 'test']:
-    for i in range(len(data[dtype]) - 1, -1, -1):
-        bag = data[dtype][i]
-
-        for j in range(len(bag['wrds_list']) - 1, -1, -1):
-            data[dtype][i]['wrds_list'][j] = data[dtype][i]['wrds_list'][j][:MAX_WORDS]
-            data[dtype][i]['pos1_list'][j] = data[dtype][i]['pos1_list'][j][:MAX_WORDS]
-            data[dtype][i]['pos2_list'][j] = data[dtype][i]['pos2_list'][j][:MAX_WORDS]
-            data[dtype][i]['dep_mask_list'][j] = data[dtype][i]['dep_mask_list'][j][:MAX_WORDS]
-            data[dtype][i]['dep_list'][j] = data[dtype][i]['dep_list'][j][:MAX_WORDS]
-
-        if len(data[dtype][i]['wrds_list']) == 0:
-            del data[dtype][i]
-            del_cnt += 1
-            continue
-
-print('Bags deleted {}'.format(del_cnt))
-
-"""***********************************建立词库**********************************************"""
-MAX_VOCAB = 150000
-# 词频字典
-voc_freq = ddict(int)
-
-for bag in data['train']:
-    for sentence in bag['wrds_list']:
-        for wrd in sentence:
-            voc_freq[wrd] += 1
-
-freq = list(voc_freq.items())
-freq.sort(key=lambda x: x[1], reverse=True)
-freq = freq[:MAX_VOCAB]
-vocab, _ = map(list, zip(*freq))
-
-vocab.append('UNK')
-
-"""*******************************建立word 和 id之间的映射表*********************************"""
-
-
-# 词到id的字典 编号从1开始，留下OOV词汇的0位置
-def getIdMap(vals, begin_idx=1):
-    ele2id = {}
-    for id, ele in enumerate(vals):
-        ele2id[ele] = id + begin_idx
-    return ele2id
-
-
-voc2id = getIdMap(vocab, 1)
-id2voc = dict([(v, k) for k, v in voc2id.items()])
-
-print('Chosen Vocabulary:\t{}'.format(len(vocab)))
-
-"""******************************将数据转化为张量形式************************************"""
-
-MAX_POS = 60  # 并不是最终的max_pos,而是计算max_pos的margin
-
-
-# 词转id
-def getId(wrd, wrd2id, def_val='NONE'):
-    if wrd in wrd2id:
-        return wrd2id[wrd]
-    else:
-        return wrd2id[def_val]
-
-
-def posMap(pos):
-    if pos < -MAX_POS:
-        return 0
-    elif pos > MAX_POS:
-        return (MAX_POS + 1) * 2
-    else:
-        return pos + (MAX_POS + 1)
-
-
-def procData(data, split='train'):
-    result = []
-
-    for bag in data:
-        res = {}  # k-hot label
-        res['X'] = [[getId(wrd, voc2id, 'UNK') for wrd in wrds] for wrds in bag['wrds_list']]
-        res['Pos1'] = [[posMap(pos) for pos in pos1] for pos1 in bag['pos1_list']]
-        res['Pos2'] = [[posMap(pos) for pos in pos2] for pos2 in bag['pos2_list']]
-        res['DepMask'] = bag['dep_mask_list']
-        res['Dep'] = bag['dep_list']
-        res['Y'] = bag['rels']
-        res['HeadLabel'] = bag['head_label']
-        res['TailLabel'] = bag['tail_label']
-        res['HeadPos'] = bag['head_pos_list']
-        res['TailPos'] = bag['tail_pos_list']
-        result.append(res)
-    return result
-
-
-def splitBags(data, chunk_size):
-    delbag = 0
-    addbag = 0
-    for i in range(len(data) - 1, -1, -1):
-        bag = data[i]
-        if len(bag['X']) > chunk_size:
-            delbag += 1
-            del data[i]
-            chunks = getChunks(range(len(bag['X'])), chunk_size)
-
-            for chunk in chunks:
-                res={}
-                res['Y'] = bag['Y']
-                res['HeadLabel'] = bag['HeadLabel']
-                res['TailLabel'] = bag['TailLabel']
-                res['X'] = [bag['X'][j] for j in chunk]
-                res['Pos1'] = [bag['Pos1'][j] for j in chunk]
-                res['Pos2'] = [bag['Pos2'][j] for j in chunk]
-                res['HeadPos'] = [bag['HeadPos'][j] for j in chunk]
-                res['TailPos'] = [bag['TailPos'][j] for j in chunk]
-                res['DepMask'] = [bag['DepMask'][j] for j in chunk]
-                res['Dep'] = [bag['Dep'][j] for j in chunk]
-
-                data.append(res)
-                addbag += 1
-
-    print('deleted bag :{}  added bag :{}'.format(delbag, addbag))
-    return data
-
-
-train_data_r = procData(data['train'], 'train')
-print('train_data_r:{}'.format(len(train_data_r)))
-pickle.dump(train_data_r, open('/data/PKL/train_r.pkl', 'wb'))
-
-train_data = splitBags(train_data_r, 100)
-print('train_data:{}'.format(len(train_data)))
-pickle.dump(train_data, open('/data/PKL/train.pkl', 'wb'))
-
-test_data_r = procData(data['test'], 'test')
-print('test_data_r:{}'.format(len(test_data_r)))
-pickle.dump(test_data_r, open('/data/PKL/test_r.pkl', 'wb'))
-
-test_data = splitBags(test_data_r, 100)
-print('test_data:{}'.format(len(test_data)))
-pickle.dump(test_data, open('/data/PKL/test.pkl', 'wb'))
-
-param_data = {
-    "voc2id": voc2id,
-    "id2voc": id2voc,
-    "max_pos": (MAX_POS + 1) * 2 + 1,
-    "rel2id": rel2id,
-    "dep2id": dep2id,
-    'e_type2id': type2id
-}
-print('writing data')
-pickle.dump(param_data, open('/data/PKL/dict.pkl', 'wb'))
-
-
-
-def getPNdata(data):
-    # 为计算p@n准备数据
-    p_one = []
-    p_two = []
-    p_all = []
-
-    for bag in data:
-        if len(bag['X']) < 2:
-            continue
-        index = list(range(len(bag['X'])))
-        random.shuffle(index)
-
-        p_one.append({
-            'X': [bag['X'][index[0]]],
-            'Pos1': [bag['Pos1'][index[0]]],
-            'Pos2': [bag['Pos2'][index[0]]],
-            'HeadPos': [bag['HeadPos'][index[0]]],
-            'TailPos': [bag['TailPos'][index[0]]],
-            'DepMask': [bag['DepMask'][index[0]]],
-            'Dep': [bag['Dep'][index[0]]],
-            'Y': bag['Y'],
-            'HeadLabel': bag['HeadLabel'],
-            'TailLabel': bag['TailLabel']
-        })
-        p_two.append({
-            'X': [bag['X'][index[0]], bag['X'][index[1]]],
-            'Pos1': [bag['Pos1'][index[0]], bag['Pos1'][index[1]]],
-            'Pos2': [bag['Pos2'][index[0]], bag['Pos2'][index[1]]],
-            'HeadPos': [bag['HeadPos'][index[0]], bag['HeadPos'][index[1]]],
-            'TailPos': [bag['TailPos'][index[0]], bag['TailPos'][index[1]]],
-            'DepMask': [bag['DepMask'][index[0]], bag['DepMask'][index[1]]],
-            'Dep': [bag['Dep'][index[0]], bag['Dep'][index[1]]],
-            'Y': bag['Y'],
-            'HeadLabel': bag['HeadLabel'],
-            'TailLabel': bag['TailLabel']
-        })
-        p_all.append({
-            'X': bag['X'],
-            'Pos1': bag['Pos1'],
-            'Pos2': bag['Pos2'],
-            'HeadPos': bag['HeadPos'],
-            'TailPos': bag['TailPos'],
-            'DepMask': bag['DepMask'],
-            'Dep': bag['Dep'],
-            'Y': bag['Y'],
-            'HeadLabel': bag['HeadLabel'],
-            'TailLabel': bag['TailLabel']
-        })
-    return p_one, p_two, p_all
-
-
-p1_r, p2_r, p3_r = getPNdata(test_data_r)
-pickle.dump(p1_r, open('/data/PKL/pn1_r.pkl', 'wb'))
-pickle.dump(p2_r, open('/data/PKL/pn2_r.pkl', 'wb'))
-pickle.dump(p3_r, open('/data/PKL/pn3_r.pkl', 'wb'))
-
-p1_data, p2_data, p3_data = getPNdata(test_data)
-pickle.dump(p1_data, open('/data/PKL/pn1.pkl', 'wb'))
-pickle.dump(p2_data, open('/data/PKL/pn2.pkl', 'wb'))
-pickle.dump(p3_data, open('/data/PKL/pn3.pkl', 'wb'))
-print('writing over')

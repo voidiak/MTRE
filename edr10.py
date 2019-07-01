@@ -150,7 +150,7 @@ class WarmupModel(ModelDesc):
             embed_init = get_embeddings(model, self.vocab, WORD_EMBED_DIM)
             _word_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable= True, regularizer=self.regularizer)
             #OOV pad
-            zero_pad = tf.random.normal([1, WORD_EMBED_DIM])
+            zero_pad = tf.zeros([1, WORD_EMBED_DIM])
             word_embeddings = tf.concat([zero_pad, _word_embeddings], axis=0)
             pos1_embeddings = tf.get_variable('pos1_embeddings', [MAX_POS, POS_EMBED_DIM],
                                               initializer=tf.contrib.layers.xavier_initializer(), trainable=True,
@@ -628,7 +628,7 @@ def resume_train(ds_train, ds_test, model_path, params, current_epoch, add_epoch
                 every_k_epochs=1),
             MovingAverageSummary(),
             MergeAllSummaries(),
-            GPUMemoryTracker(),
+            # GPUMemoryTracker(),
         ],
         model=Model(params),
         max_epoch=current_epoch + add_epochs,
@@ -735,8 +735,8 @@ if __name__ == '__main__':
                         help='size of the representations used in the bilinear classifier for parsing')
     parser.add_argument('-coe', dest='coe', default=0.3, type=float, help='value for loss addition')
     parser.add_argument('-lr', dest='lr', default=0.001, type=float, help='learning rate')
-    parser.add_argument('-pre_epochs', dest='pre_epochs', required=True, type=int, help='pretraining epochs')
-    parser.add_argument('-epochs', dest='epochs', required=True, type=int, help='epochs to train/predict')
+    parser.add_argument('-pre_epochs', dest='pre_epochs',default=3, type=int, help='pretraining epochs')
+    parser.add_argument('-epochs', dest='epochs', default=2, type=int, help='epochs to train/predict')
     parser.add_argument('-note', dest='note',default='', help='other args')
     subparsers = parser.add_subparsers(title='command', dest='command')
     parser_pretrain = subparsers.add_parser('pretrain')
