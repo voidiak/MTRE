@@ -190,6 +190,13 @@ def read_file(file_path):
                 # 当headpos超出max length的时候，置为0
                 mapped_head_pos = mappos(head_pos)
                 mapped_tail_pos = mappos(tail_pos)
+                entity_max_pos = max(mapped_head_pos, mapped_tail_pos)
+                if entity_max_pos>100:
+                    print('Skipped entry!!')
+                    print('{} | {} | {}'.format(bag['head'], bag['tail'], sent['sent']))
+                    pdb.set_trace()
+                    continue
+
 
                 dep_mask = []  # 用于dependency parsing中标记词语位置的mask
 
@@ -244,7 +251,8 @@ def read_file(file_path):
                 dep_label = [item for item in dep_label_dict.values()]
 
                 sen_length = len(dep_head)
-                entity_pos = (head_pos, tail_pos)
+
+
                 mapped_pos = (mapped_head_pos, mapped_tail_pos)#由于dep_head的索引是从1开始计数，所以正好和map后的entity pos一致
                 len_limit = min(100, sen_length) + 1
                 dep = []
