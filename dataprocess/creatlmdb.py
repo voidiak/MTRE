@@ -26,6 +26,30 @@ class Raw(DataFlow):
             output = [X, Pos1, Pos2, DepMask, HeadPos, TailPos, DepLabel, ReLabel, HeadLabel, TailLabel]
             yield output
 
+class Ridofzero(DataFlow):
+    def __init__(self, data):
+        self.data = data
+
+    def __len__(self):
+        return len(self.data)
+
+    def __iter__(self):
+        for bag in data:
+            if min(bag['Y']) == 0:
+                continue
+            else:
+                X = bag['X']
+                Pos1 = bag['Pos1']
+                Pos2 = bag['Pos2']
+                DepMask = bag['DepMask']
+                HeadPos = bag['HeadPos']
+                TailPos = bag['TailPos']
+                DepLabel = bag['Dep']
+                ReLabel = bag['Y']
+                HeadLabel = bag['HeadLabel']
+                TailLabel = bag['TailLabel']
+                output = [X, Pos1, Pos2, DepMask, HeadPos, TailPos, DepLabel, ReLabel, HeadLabel, TailLabel]
+                yield output
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -45,5 +69,5 @@ if __name__ == "__main__":
     elif args.command == 'eval':
         data = pickle.load(open(args.dataset, 'rb'))
         print('{}:{}'.format(args.dataset, len(data)))
-        ds = Raw(data)
+        ds = Ridofzero(data)
         LMDBSerializer.save(ds, args.db)

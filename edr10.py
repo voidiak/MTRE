@@ -68,8 +68,8 @@ class getbatch(ProxyDataFlow):
                 dropout = 1.0
                 rec_dropout = 1.0
             else:
-                dropout = 0.8
-                rec_dropout = 0.8
+                dropout = 0.5
+                rec_dropout = 0.5
             yield [Xs, Pos1s, Pos2s, HeadPoss, TailPoss, DepMasks, X_len, max_seq_len, total_sents, total_bags, SentNum,
                    ReLabels, DepLabels, HeadLabels, TailLabels, rec_dropout, dropout]
 
@@ -110,7 +110,6 @@ class getbatch(ProxyDataFlow):
 class WarmupModel(ModelDesc):
     def __init__(self, params):
         self.rnn_dim = params.rnn_dim
-        self.proj_dim = params.proj_dim
         self.dep_proj_dim = params.dep_proj_dim
         self.lr = params.lr
         if params.l2 == 0.0:
@@ -175,11 +174,9 @@ class WarmupModel(ModelDesc):
             rnn_output_dim = self.rnn_dim * 2
 
         with tf.variable_scope('dep_predictions'):
-            arc_dep_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_dep_hidden')
-            arc_head_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_head_hidden')
             # activation
-            arc_dep_hidden = tf.nn.relu(arc_dep_hidden)
-            arc_head_hidden = tf.nn.relu(arc_head_hidden)
+            arc_dep_hidden = tf.nn.relu(hidden_states)
+            arc_head_hidden = tf.nn.relu(hidden_states)
 
             # dropout
             arc_dep_hidden = Dropout(arc_dep_hidden, keep_prob=dropout)
@@ -187,7 +184,7 @@ class WarmupModel(ModelDesc):
 
             # bilinear classifier excluding the final dot product
             arc_head = tf.layers.dense(arc_head_hidden, self.dep_proj_dim, name='arc_head')
-            W = tf.get_variable('shared_W', shape=[self.proj_dim, 1,
+            W = tf.get_variable('shared_W', shape=[rnn_output_dim, 1,
                                                    self.dep_proj_dim],
                                 initializer=tf.contrib.layers.xavier_initializer())
             arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
@@ -298,6 +295,8 @@ class WarmupModel(ModelDesc):
             hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
             tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
 
+        hr_out = Dropout(hr_out, keep_prob=0.2)
+        tr_out = Dropout(tr_out, keep_prob=0.2)
         # get ner accuracy
         ner_logits = tf.nn.softmax(hr_out)
         ner_pred = tf.argmax(ner_logits, axis=1)
@@ -328,7 +327,6 @@ class WarmupModel(ModelDesc):
 class Model(ModelDesc):
     def __init__(self, params):
         self.rnn_dim = params.rnn_dim
-        self.proj_dim = params.proj_dim
         self.dep_proj_dim = params.dep_proj_dim
         self.lr = params.lr
         if params.l2 == 0.0:
@@ -394,13 +392,9 @@ class Model(ModelDesc):
             rnn_output_dim = self.rnn_dim * 2
 
         with tf.variable_scope('dep_predictions'):
-            # Projection 考虑现在hidden states是多个句子的串联，用cnn
-            arc_dep_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_dep_hidden')
-            arc_head_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_head_hidden')
-
             # activation
-            arc_dep_hidden = tf.nn.relu(arc_dep_hidden)
-            arc_head_hidden = tf.nn.relu(arc_head_hidden)
+            arc_dep_hidden = tf.nn.relu(hidden_states)
+            arc_head_hidden = tf.nn.relu(hidden_states)
 
             # dropout
             arc_dep_hidden = Dropout(arc_dep_hidden, keep_prob=dropout)
@@ -408,7 +402,7 @@ class Model(ModelDesc):
 
             # bilinear classifier excluding the final dot product
             arc_head = tf.layers.dense(arc_head_hidden, self.dep_proj_dim, name='arc_head')
-            W = tf.get_variable('shared_W', shape=[self.proj_dim, 1,
+            W = tf.get_variable('shared_W', shape=[rnn_output_dim, 1,
                                                    self.dep_proj_dim])
             arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
             shape = tf.shape(arc_dep)
@@ -658,7 +652,7 @@ def evaluate(model, model_path, data_path, batchsize):
     y_scores = np.array([e[1:] for e in logit_list]).reshape((-1))
     y_true = np.array([e[1:] for e in label_list]).reshape((-1))
 
-    if data_path.startswith('./mdb/pn'):
+    if data_path.startswith('./mdb100/pn'):
         allprob = np.reshape(np.array(y_scores), (-1))
         allans = np.reshape(y_true, (-1))
         order = np.argsort(-allprob)
@@ -727,11 +721,9 @@ if __name__ == '__main__':
     parser.add_argument('-gpu', dest='gpu', default='0', help='gpu to use')
     parser.add_argument('-l2', dest='l2', default=1e-4, type=float, help='l2 regularization')
     parser.add_argument('-seed', dest='seed', default=1234, type=int, help='seed for randomization')
-    parser.add_argument('-rnn_dim', dest='rnn_dim', default=200, type=int, help='hidden state dimension of Bi-RNN')
-    parser.add_argument('-gcn_dim', dest='gcn_dim', default=400, type=int, help='hidden state dimension of GCN')
-    parser.add_argument('-proj_dim', dest='proj_dim', default=256, type=int,
-                        help='projection size for GRUs and hidden layers')
-    parser.add_argument('-dep_proj_dim', dest='dep_proj_dim', default=64, type=int,
+    parser.add_argument('-rnn_dim', dest='rnn_dim', default=128, type=int, help='hidden state dimension of Bi-RNN')
+    parser.add_argument('-gcn_dim', dest='gcn_dim', default=256, type=int, help='hidden state dimension of GCN')
+    parser.add_argument('-dep_proj_dim', dest='dep_proj_dim', default=128, type=int,
                         help='size of the representations used in the bilinear classifier for parsing')
     parser.add_argument('-coe', dest='coe', default=0.3, type=float, help='value for loss addition')
     parser.add_argument('-lr', dest='lr', default=0.001, type=float, help='learning rate')
@@ -749,14 +741,10 @@ if __name__ == '__main__':
     parser_evaluate.add_argument('-add_epochs', dest='add_epochs', default=0, type=int, help='epochs to continue')
     args = parser.parse_args()
     argdict = vars(args)
-    name = 'l2_{}_rnn_dim_{}_gcn_dim_{}_proj_dim_{}_dep_proj_dim_{}_coe_{}_lr_{}_pre_epochs_{}_epochs_{}_{}' \
-        .format(argdict['l2'], argdict['rnn_dim'], argdict['gcn_dim'], argdict['proj_dim'], argdict['dep_proj_dim'],
+    name = 'l2_{}_rnn_dim_{}_gcn_dim_{}_dep_proj_dim_{}_coe_{}_lr_{}_pre_epochs_{}_epochs_{}_{}' \
+        .format(argdict['l2'], argdict['rnn_dim'], argdict['gcn_dim'], argdict['dep_proj_dim'],
                 argdict['coe'],
                 argdict['lr'], argdict['pre_epochs'], argdict['epochs'], argdict['note'])
-    # name = 'l2_{}_rnn_dim_{}_gcn_dim_{}_proj_dim_{}_dep_proj_dim_{}_coe_{}_lr_{}_pre_epochs_{}_epochs_{}' \
-    #     .format(argdict['l2'], argdict['rnn_dim'], argdict['gcn_dim'], argdict['proj_dim'], argdict['dep_proj_dim'],
-    #             argdict['coe'],
-    #             argdict['lr'], argdict['pre_epochs'], argdict['epochs'])
     logger.auto_set_dir(action='k', name=name)
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -769,13 +757,13 @@ if __name__ == '__main__':
         random.seed(args.seed)
         np.random.seed(args.seed)
         # train
-        ds = getdata('./mdb/train.mdb', BATCH_SIZE, True)
-        dss = getdata('./mdb/test.mdb', BATCH_SIZE, False)
+        ds = getdata('./mdb100/train.mdb', BATCH_SIZE, True)
+        dss = getdata('./mdb100/test.mdb', BATCH_SIZE, False)
         config = get_config(ds, dss, args)
         launch_train_with_config(config, SimpleTrainer())
     elif args.command == 'train':
-        ds = getdata('./mdb/train.mdb', BATCH_SIZE, True)
-        dss = getdata('./mdb/test.mdb', BATCH_SIZE, False)
+        ds = getdata('./mdb100/train.mdb', BATCH_SIZE, True)
+        dss = getdata('./mdb100/test.mdb', BATCH_SIZE, False)
         # resume
         if args.previous_model:
             current_epoch = args.previous_model // step
@@ -790,7 +778,7 @@ if __name__ == '__main__':
     elif args.command == 'eval':
         # predict
         if args.best_model:
-            test_path = './mdb/test.mdb'
+            test_path = './mdb100/test.mdb'
             best_model_path = os.path.join('./train_log/edr10:{}/'.format(name), 'model-' + str(args.best_model))
             p, r, f1, aur, p_, r_ = evaluate(Model(args), best_model_path, test_path, BATCH_SIZE)
             plotPRCurve(p_, r_, './train_log/edr10:{}'.format(name))
@@ -803,7 +791,7 @@ if __name__ == '__main__':
                 for model in [str(step * (args.pre_epochs + 1) + i * step) for i in range(args.epochs+args.add_epochs)]:
                     f.write(model + '\t')
                     for data in ['pn1', 'pn2', 'pn3']:
-                        data_path = './mdb/{}.mdb'.format(data)
+                        data_path = './mdb100/{}.mdb'.format(data)
                         p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr10:{}/'.format(name),
                                                                               'model-' + model), data_path, BATCH_SIZE)
                         logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))

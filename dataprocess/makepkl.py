@@ -11,7 +11,7 @@ dep2id = json.loads(open("/data/MLRE/data/dep2id.json", encoding='utf-8').read()
 id2dep = dict([(v, k) for k, v in dep2id.items()])
 type2id = json.loads(open("/data/MLRE/data/etype2id.json", encoding='utf-8').read())
 entity2typeid = json.loads(open('/data/MLRE/data/entity2id.json', encoding='utf8').read())
-
+MAX_LEN=130
 
 def read_file(file_path):
     null_sentence = 0
@@ -181,7 +181,7 @@ def read_file(file_path):
                 pos2 = [i - tail_pos for i in range(tok_idx - 1)]
 
                 def mappos(p):
-                    if p > 99:
+                    if p > MAX_LEN-1:
                         p = 0
                     else:
                         p = p + 1
@@ -247,7 +247,7 @@ def read_file(file_path):
 
 
                 # mapped_pos = (mapped_head_pos, mapped_tail_pos)#由于dep_head的索引是从1开始计数，所以正好和map后的entity pos一致
-                len_limit = min(100, sen_length) + 1
+                len_limit = min(MAX_LEN, sen_length) + 1
                 dep = []
 
                 # masked dependency label
@@ -318,7 +318,7 @@ print('Bags processed:Train:{},Test:{}'.format(len(data['train']), len(data['tes
 """*************************************删除离群数据****************************************"""
 
 del_cnt = 0
-MAX_WORDS = 100
+MAX_WORDS = MAX_LEN
 for dtype in ['train', 'test']:
     for i in range(len(data[dtype]) - 1, -1, -1):
         bag = data[dtype][i]
@@ -372,7 +372,7 @@ print('Chosen Vocabulary:\t{}'.format(len(vocab)))
 
 """******************************将数据转化为张量形式************************************"""
 
-MAX_POS = 60  # 并不是最终的max_pos,而是计算max_pos的margin
+MAX_POS = 80  # 并不是最终的max_pos,而是计算max_pos的margin
 
 
 # 词转id
@@ -443,19 +443,19 @@ def splitBags(data, chunk_size):
 
 train_data_r = procData(data['train'], 'train')
 print('train_data_r:{}'.format(len(train_data_r)))
-pickle.dump(train_data_r, open('/data/PKL/train_r.pkl', 'wb'))
+pickle.dump(train_data_r, open('/data/PKL{}/train_r.pkl'.format(MAX_LEN), 'wb'))
 
 train_data = splitBags(train_data_r, 100)
 print('train_data:{}'.format(len(train_data)))
-pickle.dump(train_data, open('/data/PKL/train.pkl', 'wb'))
+pickle.dump(train_data, open('/data/PKL{}/train.pkl'.format(MAX_LEN), 'wb'))
 
 test_data_r = procData(data['test'], 'test')
 print('test_data_r:{}'.format(len(test_data_r)))
-pickle.dump(test_data_r, open('/data/PKL/test_r.pkl', 'wb'))
+pickle.dump(test_data_r, open('/data/PKL{}/test_r.pkl'.format(MAX_LEN), 'wb'))
 
 test_data = splitBags(test_data_r, 100)
 print('test_data:{}'.format(len(test_data)))
-pickle.dump(test_data, open('/data/PKL/test.pkl', 'wb'))
+pickle.dump(test_data, open('/data/PKL{}/test.pkl'.format(MAX_LEN), 'wb'))
 
 param_data = {
     "voc2id": voc2id,
@@ -466,7 +466,7 @@ param_data = {
     'e_type2id': type2id
 }
 print('writing data')
-pickle.dump(param_data, open('/data/PKL/dict.pkl', 'wb'))
+pickle.dump(param_data, open('/data/PKL{}/dict.pkl'.format(MAX_LEN), 'wb'))
 
 
 
@@ -522,12 +522,12 @@ def getPNdata(data):
 
 
 p1_r, p2_r, p3_r = getPNdata(test_data_r)
-pickle.dump(p1_r, open('/data/PKL/pn1_r.pkl', 'wb'))
-pickle.dump(p2_r, open('/data/PKL/pn2_r.pkl', 'wb'))
-pickle.dump(p3_r, open('/data/PKL/pn3_r.pkl', 'wb'))
+pickle.dump(p1_r, open('/data/PKL{}/pn1_r.pkl'.format(MAX_LEN), 'wb'))
+pickle.dump(p2_r, open('/data/PKL{}/pn2_r.pkl'.format(MAX_LEN), 'wb'))
+pickle.dump(p3_r, open('/data/PKL{}/pn3_r.pkl'.format(MAX_LEN), 'wb'))
 
 p1_data, p2_data, p3_data = getPNdata(test_data)
-pickle.dump(p1_data, open('/data/PKL/pn1.pkl', 'wb'))
-pickle.dump(p2_data, open('/data/PKL/pn2.pkl', 'wb'))
-pickle.dump(p3_data, open('/data/PKL/pn3.pkl', 'wb'))
+pickle.dump(p1_data, open('/data/PKL{}/pn1.pkl'.format(MAX_LEN), 'wb'))
+pickle.dump(p2_data, open('/data/PKL{}/pn2.pkl'.format(MAX_LEN), 'wb'))
+pickle.dump(p3_data, open('/data/PKL{}/pn3.pkl'.format(MAX_LEN), 'wb'))
 print('writing over')
