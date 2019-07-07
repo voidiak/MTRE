@@ -23,7 +23,7 @@ MAX_POS = (60 + 1) * 2 + 1
 EMBED_LOC = '/data/MLRE-NG-archive/glove/glove.6B.50d_word2vec.txt'
 BASELINE_LOC = './baseline/'
 VOCAB_LOC = './vocab.pkl'
-
+MAX_LEN =100
 
 class getbatch(ProxyDataFlow):
 
@@ -232,6 +232,8 @@ class WarmupModel(ModelDesc):
             hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
             tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
 
+        hr_out = Dropout(hr_out, keep_prob=0.8)
+        tr_out = Dropout(tr_out, keep_prob=0.8)
         # get ner accuracy
         ner_logits = tf.nn.softmax(hr_out)
         ner_pred = tf.argmax(ner_logits, axis=1)
@@ -274,6 +276,7 @@ class WarmupModel(ModelDesc):
             dep_mask_ = tf.tile(tf.expand_dims(dep_mask, 1), [1, mask_shape[1], 1])
             arc_scores += (dep_mask_ - 1) * 100
             nn_dep_out = arc_scores
+            nn_dep_out = Dropout(nn_dep_out, keep_prob=0.5)
 
         dep_labels = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
         # get dep accuracy
@@ -454,10 +457,12 @@ class Model(ModelDesc):
             # compute the scores for each candidate arc
             word_score = tf.matmul(arc_head, arc_dep, transpose_b=True)
             arc_scores = word_score
+            arc_scores = Dropout(arc_scores, keep_prob=0.5)
 
         # gcn encoding dependency tree structure
         dep_matrix = tf.nn.softmax(arc_scores)
         gcn_matrix = tf.transpose(dep_matrix, [0, 2, 1])
+        gcn_matrix = gcn_matrix+tf.eye(seq_len)
 
         with tf.variable_scope('gcn_encoder') as scope:
             denom = tf.expand_dims(tf.reduce_sum(gcn_matrix, axis=2), axis=2) + 1
@@ -538,6 +543,8 @@ class Model(ModelDesc):
             b_e = tf.get_variable('b', initializer=np.zeros([ENTITY_TYPE_CLASS]).astype(np.float32))
             hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
             tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
+            hr_out = Dropout(hr_out, keep_prob=0.8)
+            tr_out = Dropout(tr_out, keep_prob=0.8)
 
         label_y = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
         # use sigmoid loss multi-label classification
@@ -548,7 +555,7 @@ class Model(ModelDesc):
         dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=arc_scores, labels=label_y)
         dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
         re_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=re_out, labels=input_y))
-        loss = (1 - self.coe) * re_loss + self.coe * (0.35 * head_loss + 0.35 * tail_loss + 0.3 * dp_loss)
+        loss = (1 - self.coe) * re_loss + self.coe * (0.25 * head_loss + 0.25 * tail_loss + 0.5 * dp_loss)
         if self.regularizer is not None:
             loss += tf.contrib.layers.apply_regularization(self.regularizer,
                                                            tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
@@ -601,7 +608,7 @@ def resume_train(ds_train, ds_test, model_path, params, current_epoch, add_epoch
             StatMonitorParamSetter('learning_rate', 'total_loss',
                                    lambda x: x * 0.2, 0, 5),
             PeriodicTrigger(
-                InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('re_accu', 'accuracy')]),
+                InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('re_accu', 're_accuracy')]),
                 every_k_epochs=1),
             MovingAverageSummary(),
             MergeAllSummaries(),
@@ -754,13 +761,13 @@ if __name__ == '__main__':
     parser.add_argument('-gpu', dest='gpu', default='0', help='gpu to use')
     parser.add_argument('-l2', dest='l2', default=1e-4, type=float, help='l2 regularization')
     parser.add_argument('-seed', dest='seed', default=1234, required=True, type=int, help='seed for randomization')
-    parser.add_argument('-rnn_dim', dest='rnn_dim', default=180, type=int, help='hidden state dimension of Bi-RNN')
-    parser.add_argument('-gcn_dim', dest='gcn_dim', default=360, type=int, help='hidden state dimension of GCN')
-    parser.add_argument('-proj_dim', dest='proj_dim', default=256, type=int,
+    parser.add_argument('-rnn_dim', dest='rnn_dim', default=200, type=int, help='hidden state dimension of Bi-RNN')
+    parser.add_argument('-gcn_dim', dest='gcn_dim', default=400, type=int, help='hidden state dimension of GCN')
+    parser.add_argument('-proj_dim', dest='proj_dim', default=512, type=int,
                         help='projection size for GRUs and hidden layers')
-    parser.add_argument('-dep_proj_dim', dest='dep_proj_dim', default=64, type=int,
+    parser.add_argument('-dep_proj_dim', dest='dep_proj_dim', default=128, type=int,
                         help='size of the representations used in the bilinear classifier for parsing')
-    parser.add_argument('-coe', dest='coe', default=0.3, type=float, help='value for loss addition')
+    parser.add_argument('-coe', dest='coe', default=0.5, type=float, help='value for loss addition')
     parser.add_argument('-lr', dest='lr', default=0.001, type=float, help='learning rate')
     parser.add_argument('-pre_epochs', dest='pre_epochs', default=3, type=int, help='pretraining epochs')
     parser.add_argument('-epochs', dest='epochs', default=2, type=int, help='epochs to train/predict')
@@ -776,7 +783,8 @@ if __name__ == '__main__':
     parser_evaluate.add_argument('-add_epochs', dest='add_epochs', default=0, type=int, help='epochs to continue')
     args = parser.parse_args()
     argdict = vars(args)
-    name = 'seed_{}_rnn_dim_{}'.format(argdict['seed'], argdict['rnn_dim'])
+    name = 'mdb{}_seed_{}_rnn_dim_{}_pre_epochs_{}_epochs_{}'.format(MAX_LEN, argdict['seed'], argdict['rnn_dim'],
+                                                                     argdict['pre_epochs'], argdict['epochs'])
     logger.auto_set_dir(action='k', name=name)
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -789,38 +797,38 @@ if __name__ == '__main__':
         random.seed(args.seed)
         np.random.seed(args.seed)
         # train
-        ds = getdata('./mdb100/train.mdb', args.batch_size, True)
-        dss = getdata('./mdb100/test.mdb', args.batch_size, False)
+        ds = getdata('./mdb{}/train.mdb'.format(MAX_LEN), args.batch_size, True)
+        dss = getdata('./mdb{}/test.mdb'.format(MAX_LEN), args.batch_size, False)
         config = get_config(ds, dss, args)
         launch_train_with_config(config, SimpleTrainer())
     elif args.command == 'train':
-        ds = getdata('./mdb100/train.mdb', args.batch_size, True)
-        dss = getdata('./mdb100/test.mdb', args.batch_size, False)
+        ds = getdata('./mdb{}/train.mdb'.format(MAX_LEN), args.batch_size, True)
+        dss = getdata('./mdb{}/test.mdb'.format(MAX_LEN), args.batch_size, False)
         # resume
         if args.previous_model:
             current_epoch = args.previous_model // step
-            load_path = './train_log/edr200:{}/model-{}'.format(name, args.previous_model)
+            load_path = './train_log/edr{}:{}/model-{}'.format(MAX_LEN, name, args.previous_model)
             resume_config = resume_train(ds, dss, load_path, args, current_epoch, args.add_epochs)
             launch_train_with_config(resume_config, SimpleTrainer())
         else:
             current_step = step * args.pre_epochs
-            load_path = './train_log/edr200:{}/model-{}'.format(name, current_step)
+            load_path = './train_log/edr{}:{}/model-{}'.format(MAX_LEN, name, current_step)
             resume_config = resume_train(ds, dss, load_path, args, args.pre_epochs, args.epochs)
             launch_train_with_config(resume_config, SimpleTrainer())
     elif args.command == 'eval':
         # predict
         if args.best_model:
-            test_path = './mdb100/test.mdb'
-            best_model_path = os.path.join('./train_log/edr200:{}/'.format(name), 'model-' + str(args.best_model))
+            test_path = './mdb{}/test.mdb'.format(MAX_LEN)
+            best_model_path = os.path.join('./train_log/edr{}:{}/'.format(MAX_LEN, name), 'model-' + str(args.best_model))
             p, r, f1, aur, p_, r_ ,p10_result= evaluate(Model(args), best_model_path, test_path, args.batch_size)
-            plotPRCurve(p_, r_, './train_log/edr200:{}'.format(name))
-            pickle.dump({'precision': p_, 'recall': r_}, open('./train_log/edr200:{}/p_r.pkl'.format(name), 'wb'))
-            with open('./train_log/edr200:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
+            plotPRCurve(p_, r_, './train_log/edr{}:{}'.format(MAX_LEN, name))
+            pickle.dump({'precision': p_, 'recall': r_}, open('./train_log/edr{}:{}/p_r.pkl'.format(MAX_LEN, name), 'wb'))
+            with open('./train_log/edr{}:{}/{}.txt'.format(MAX_LEN, name, 'best_model'), 'w', encoding='utf-8')as f:
                 f.write('precision:\t{}\nrecall:\t{}\nf1:\t{}\nauc:\t{}\n'.format(p, r, f1, aur))
                 f.write(name + '\n')
                 f.write('model name:' + str(args.best_model) + '\t' + '\n')
                 for data in ['pn1', 'pn2', 'pn3', 'test_r', 'test']:
-                    data_path = './mdb100/{}.mdb'.format(data)
+                    data_path = './mdb{}/{}.mdb'.format(MAX_LEN, data)
                     p100, p200, p300 = evaluatepn(Model(args), best_model_path, data_path, args.batch_size)
                     logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))
                     line = "{}:\t{:.3f}\t{:.3f}\t{:.3f}\t\n".format(data, p100, p200, p300)
@@ -829,14 +837,14 @@ if __name__ == '__main__':
                 f.write('\n')
                 f.close()
         else:
-            with open('./train_log/edr200:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
+            with open('./train_log/edr{}:{}/{}.txt'.format(MAX_LEN, name, name), 'w', encoding='utf-8')as f:
                 f.write(name + '\n')
                 for model in [str(step * (args.pre_epochs + 1) + i * step) for i in
                               range(args.epochs + args.add_epochs)]:
                     f.write(model + '\t')
                     for data in ['pn1', 'pn2', 'test']:
-                        data_path = './mdb100/{}.mdb'.format(data)
-                        p100, p200, p300 = evaluatepn(Model(args), os.path.join('./train_log/edr200:{}/'.format(name),
+                        data_path = './mdb{}/{}.mdb'.format(MAX_LEN, data)
+                        p100, p200, p300 = evaluatepn(Model(args), os.path.join('./train_log/edr{}:{}/'.format(MAX_LEN, name),
                                                                                 'model-' + model), data_path,
                                                       args.batch_size)
                         logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))

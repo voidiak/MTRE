@@ -233,6 +233,8 @@ class WarmupModel(ModelDesc):
             hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
             tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
 
+        hr_out = Dropout(hr_out, keep_prob=0.5)
+        tr_out = Dropout(tr_out, keep_prob=0.5)
         # get ner accuracy
         ner_logits = tf.nn.softmax(hr_out)
         ner_pred = tf.argmax(ner_logits, axis=1)
@@ -755,7 +757,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-gpu', dest='gpu', default='0', help='gpu to use')
     parser.add_argument('-l2', dest='l2', default=1e-4, type=float, help='l2 regularization')
-    parser.add_argument('-seed', dest='seed', default=1234, required=True, type=int, help='seed for randomization')
+    parser.add_argument('-seed', dest='seed', default=1234,  type=int, help='seed for randomization')
     parser.add_argument('-rnn_dim', dest='rnn_dim', default=128, type=int, help='hidden state dimension of Bi-RNN')
     parser.add_argument('-gcn_dim', dest='gcn_dim', default=256, type=int, help='hidden state dimension of GCN')
     parser.add_argument('-proj_dim', dest='proj_dim', default=512, type=int,
@@ -764,7 +766,7 @@ if __name__ == '__main__':
                         help='size of the representations used in the bilinear classifier for parsing')
     parser.add_argument('-coe', dest='coe', default=0.3, type=float, help='value for loss addition')
     parser.add_argument('-lr', dest='lr', default=0.001, type=float, help='learning rate')
-    parser.add_argument('-pre_epochs', dest='pre_epochs', default=3, type=int, help='pretraining epochs')
+    parser.add_argument('-pre_epochs', dest='pre_epochs', default=5, type=int, help='pretraining epochs')
     parser.add_argument('-epochs', dest='epochs', default=3, type=int, help='epochs to train/predict')
     parser.add_argument('-batch_size', dest='batch_size', default=200, type=int, help='batch size')
     subparsers = parser.add_subparsers(title='command', dest='command')

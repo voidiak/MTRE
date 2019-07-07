@@ -109,128 +109,6 @@ class getbatch(ProxyDataFlow):
 class DPModel(ModelDesc):
     def __init__(self, params):
         self.rnn_dim = params.rnn_dim
-        self.dep_proj_dim = params.dep_proj_dim
-        self.lr = params.lr
-        if params.l2 == 0.0:
-            self.regularizer = None
-        else:
-            self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
-        self.vocab = pickle.load(open(VOCAB_LOC, 'rb'))
-
-
-    def inputs(self):
-        return [tf.TensorSpec([None, None], tf.int32, 'input_x'),  # Xs
-                tf.TensorSpec([None, None], tf.int32, 'input_pos1'),  # Pos1s
-                tf.TensorSpec([None, None], tf.int32, 'input_pos2'),  # Pos2s
-                tf.TensorSpec([None], tf.int32, 'head_pos'),  # HeadPoss
-                tf.TensorSpec([None], tf.int32, 'tail_pos'),  # TailPoss
-                tf.TensorSpec([None, None], tf.float32, 'dep_mask'),  # DepMasks
-                tf.TensorSpec([None], tf.int32, 'x_len'),  # X_len
-                tf.TensorSpec((), tf.int32, 'seq_len'),  # max_seq_len
-                tf.TensorSpec((), tf.int32, 'total_sents'),  # total_sents
-                tf.TensorSpec((), tf.int32, 'total_bags'),  # total_bags
-                tf.TensorSpec([None, 3], tf.int32, 'sent_num'),  # SentNum
-                tf.TensorSpec([None, None], tf.int32, 'input_y'),  # ReLabels
-                tf.TensorSpec([None, None], tf.int32, 'dep_y'),  # DepLabels
-                tf.TensorSpec([None, None], tf.float32, 'head_label'),  # HeadLabels
-                tf.TensorSpec([None, None], tf.float32, 'tail_label'),  # TailLabels
-                tf.TensorSpec((), tf.float32, 'rec_dropout'),
-                tf.TensorSpec((), tf.float32, 'dropout')
-                ]
-
-    def build_graph(self, input_x, input_pos1, input_pos2, head_pos, tail_pos, dep_mask, x_len, seq_len, total_sents,
-                    total_bags, sent_num, input_y, dep_y, head_label, tail_label, rec_dropout, dropout):
-        with tf.variable_scope('word_embedding'):
-            model = gensim.models.KeyedVectors.load_word2vec_format(EMBED_LOC, binary=False)
-            embed_init = get_embeddings(model, self.vocab, WORD_EMBED_DIM)
-            _word_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable= True, regularizer=self.regularizer)
-            #OOV pad
-            zero_pad = tf.random.normal([1, WORD_EMBED_DIM])
-            word_embeddings = tf.concat([zero_pad, _word_embeddings], axis=0)
-            pos1_embeddings = tf.get_variable('pos1_embeddings', [MAX_POS, POS_EMBED_DIM],
-                                              initializer=tf.contrib.layers.xavier_initializer(), trainable=True,
-                                              regularizer=self.regularizer)
-            pos2_embeddings = tf.get_variable('pos2_embeddings', [MAX_POS, POS_EMBED_DIM],
-                                              initializer=tf.contrib.layers.xavier_initializer(), trainable=True,
-                                              regularizer=self.regularizer)
-
-            word_embeded = tf.nn.embedding_lookup(word_embeddings, input_x)
-            pos1_embeded = tf.nn.embedding_lookup(pos1_embeddings, input_pos1)
-            pos2_embeded = tf.nn.embedding_lookup(pos2_embeddings, input_pos2)
-            embeds = tf.concat([word_embeded, pos1_embeded, pos2_embeded], axis=2)
-
-        with tf.variable_scope('Bi_rnn'):
-            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.rnn_dim, name='FW_GRU'),
-                                                    output_keep_prob=rec_dropout)
-            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.rnn_dim, name='BW_GRU'),
-                                                    output_keep_prob=rec_dropout)
-            val, state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bk_cell, embeds, sequence_length=x_len,
-                                                         dtype=tf.float32)
-            hidden_states = tf.concat((val[0], val[1]), axis=2)
-            rnn_output_dim = self.rnn_dim * 2
-
-        with tf.variable_scope('dep_predictions'):
-            # activation
-            arc_dep_hidden = tf.nn.relu(hidden_states)
-            arc_head_hidden = tf.nn.relu(hidden_states)
-
-            # dropout
-            # arc_dep_hidden = Dropout(arc_dep_hidden, keep_prob=dropout)
-            # arc_head_hidden = Dropout(arc_head_hidden, keep_prob=dropout)
-
-            # bilinear classifier excluding the final dot product
-            arc_head = tf.layers.dense(arc_head_hidden, self.dep_proj_dim, name='arc_head')
-            W = tf.get_variable('shared_W', shape=[rnn_output_dim, 1, self.dep_proj_dim],
-                                initializer=tf.contrib.layers.xavier_initializer())
-            arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
-            shape = tf.shape(arc_dep)
-            arc_dep = tf.reshape(arc_dep, [shape[0], -1, self.dep_proj_dim])
-
-            # apply the transformer trick to prevent dot products from getting too large
-            scale = np.power(self.dep_proj_dim, 0.25).astype('float32')
-            scale = tf.get_variable('scale', initializer=scale, dtype=tf.float32)
-            arc_dep /= scale
-            arc_head /= scale
-
-            # compute the scores for each candidate arc
-            word_score = tf.matmul(arc_head, arc_dep, transpose_b=True)
-            arc_scores = word_score
-
-            # disallow the model from making impossible predictions
-            mask_shape = tf.shape(dep_mask)
-            dep_mask_ = tf.tile(tf.expand_dims(dep_mask, 1), [1, mask_shape[1], 1])
-            arc_scores += (dep_mask_ - 1) * 100
-            nn_dep_out = arc_scores
-
-        dep_labels = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
-        # get dep accuracy
-        dep_logits = tf.nn.softmax(nn_dep_out)
-        dep_pred = tf.reshape(tf.argmax(dep_logits, axis=-1), [-1])
-        dep_actual = tf.reshape(tf.argmax(dep_labels, axis=-1), [-1])
-        y_mask = tf.cast(tf.reshape(dep_mask, [-1]), dtype=tf.bool)
-        pred_masked = tf.boolean_mask(dep_pred, y_mask)
-        actual_masked = tf.boolean_mask(dep_actual, y_mask)
-        dep_accuracy_ = tf.cast(tf.equal(pred_masked, actual_masked), tf.float32, name='dep_accu')
-        dep_accuracy = tf.reduce_mean(dep_accuracy_)
-        dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=dep_labels)
-        dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
-        loss = dp_loss
-        if self.regularizer is not None:
-            loss += tf.contrib.layers.apply_regularization(self.regularizer,
-                                                           tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
-        loss = tf.identity(loss, name='total_loss')
-        summary.add_moving_summary(loss, dep_accuracy)
-        return loss
-
-    def optimizer(self):
-        lr = tf.get_variable('learning_rate', initializer=0.001, trainable=False)
-        opt = tf.train.AdamOptimizer(lr)
-        return optimizer.apply_grad_processors(
-            opt, [GlobalNormClip(5), SummaryGradient()])
-
-class NERModel(ModelDesc):
-    def __init__(self, params):
-        self.rnn_dim = params.rnn_dim
         self.proj_dim = params.proj_dim
         self.dep_proj_dim = params.dep_proj_dim
         self.lr = params.lr
@@ -238,9 +116,6 @@ class NERModel(ModelDesc):
             self.regularizer = None
         else:
             self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
-        # self.embed_matrix = pickle.load(open(EMBED_LOC,'rb'))
-        self.gcn_layers = 2
-        self.gcn_dim = params.gcn_dim
         self.vocab = pickle.load(open(VOCAB_LOC, 'rb'))
 
 
@@ -271,7 +146,7 @@ class NERModel(ModelDesc):
             embed_init = get_embeddings(model, self.vocab, WORD_EMBED_DIM)
             _word_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable= True, regularizer=self.regularizer)
             #OOV pad
-            zero_pad = tf.random.normal([1, WORD_EMBED_DIM])
+            zero_pad = tf.zeros([1, WORD_EMBED_DIM])
             word_embeddings = tf.concat([zero_pad, _word_embeddings], axis=0)
             pos1_embeddings = tf.get_variable('pos1_embeddings', [MAX_POS, POS_EMBED_DIM],
                                               initializer=tf.contrib.layers.xavier_initializer(), trainable=True,
@@ -308,9 +183,135 @@ class NERModel(ModelDesc):
 
             # bilinear classifier excluding the final dot product
             arc_head = tf.layers.dense(arc_head_hidden, self.dep_proj_dim, name='arc_head')
+            W = tf.get_variable('shared_W', shape=[self.proj_dim, 1, self.dep_proj_dim],
+                                initializer=tf.contrib.layers.xavier_initializer(), regularizer=self.regularizer)
+            arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
+            shape = tf.shape(arc_dep)
+            arc_dep = tf.reshape(arc_dep, [shape[0], -1, self.dep_proj_dim])
+
+            # apply the transformer trick to prevent dot products from getting too large
+            scale = np.power(self.dep_proj_dim, 0.25).astype('float32')
+            scale = tf.get_variable('scale', initializer=scale, dtype=tf.float32)
+            arc_dep /= scale
+            arc_head /= scale
+
+            # compute the scores for each candidate arc
+            word_score = tf.matmul(arc_head, arc_dep, transpose_b=True)
+            arc_scores = word_score
+
+            # disallow the model from making impossible predictions
+            mask_shape = tf.shape(dep_mask)
+            dep_mask_ = tf.tile(tf.expand_dims(dep_mask, 1), [1, mask_shape[1], 1])
+            arc_scores += (dep_mask_ - 1) * 100
+            nn_dep_out = arc_scores
+
+        # nn_dep_out = Dropout(nn_dep_out, keep_prob=0.5)
+        dep_labels = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
+        # get dep accuracy
+        dep_logits = tf.nn.softmax(nn_dep_out)
+        dep_pred = tf.reshape(tf.argmax(dep_logits, axis=-1), [-1])
+        dep_actual = tf.reshape(tf.argmax(dep_labels, axis=-1), [-1])
+        y_mask = tf.cast(tf.reshape(dep_mask, [-1]), dtype=tf.bool)
+        pred_masked = tf.boolean_mask(dep_pred, y_mask)
+        actual_masked = tf.boolean_mask(dep_actual, y_mask)
+        dep_accuracy_ = tf.cast(tf.equal(pred_masked, actual_masked), tf.float32, name='dep_accu')
+        dep_accuracy = tf.reduce_mean(dep_accuracy_)
+        dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=dep_labels)
+        dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
+        loss = dp_loss
+        if self.regularizer is not None:
+            loss += tf.contrib.layers.apply_regularization(self.regularizer,
+                                                           tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+        loss = tf.identity(loss, name='total_loss')
+        summary.add_moving_summary(loss, dep_accuracy)
+        return loss
+
+    def optimizer(self):
+        lr = tf.get_variable('learning_rate', initializer=0.003, trainable=False)
+        opt = tf.train.AdamOptimizer(lr)
+        return optimizer.apply_grad_processors(
+            opt, [GlobalNormClip(5)])
+
+class NERModel(ModelDesc):
+    def __init__(self, params):
+        self.rnn_dim = params.rnn_dim
+        self.proj_dim = params.proj_dim
+        self.dep_proj_dim = params.dep_proj_dim
+        self.lr = params.lr
+        self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
+        # self.embed_matrix = pickle.load(open(EMBED_LOC,'rb'))
+        self.gcn_layers = 2
+        self.gcn_dim = params.gcn_dim
+        self.vocab = pickle.load(open(VOCAB_LOC, 'rb'))
+
+
+    def inputs(self):
+        return [tf.TensorSpec([None, None], tf.int32, 'input_x'),  # Xs
+                tf.TensorSpec([None, None], tf.int32, 'input_pos1'),  # Pos1s
+                tf.TensorSpec([None, None], tf.int32, 'input_pos2'),  # Pos2s
+                tf.TensorSpec([None], tf.int32, 'head_pos'),  # HeadPoss
+                tf.TensorSpec([None], tf.int32, 'tail_pos'),  # TailPoss
+                tf.TensorSpec([None, None], tf.float32, 'dep_mask'),  # DepMasks
+                tf.TensorSpec([None], tf.int32, 'x_len'),  # X_len
+                tf.TensorSpec((), tf.int32, 'seq_len'),  # max_seq_len
+                tf.TensorSpec((), tf.int32, 'total_sents'),  # total_sents
+                tf.TensorSpec((), tf.int32, 'total_bags'),  # total_bags
+                tf.TensorSpec([None, 3], tf.int32, 'sent_num'),  # SentNum
+                tf.TensorSpec([None, None], tf.int32, 'input_y'),  # ReLabels
+                tf.TensorSpec([None, None], tf.int32, 'dep_y'),  # DepLabels
+                tf.TensorSpec([None, None], tf.float32, 'head_label'),  # HeadLabels
+                tf.TensorSpec([None, None], tf.float32, 'tail_label'),  # TailLabels
+                tf.TensorSpec((), tf.float32, 'rec_dropout'),
+                tf.TensorSpec((), tf.float32, 'dropout')
+                ]
+
+    def build_graph(self, input_x, input_pos1, input_pos2, head_pos, tail_pos, dep_mask, x_len, seq_len, total_sents,
+                    total_bags, sent_num, input_y, dep_y, head_label, tail_label, rec_dropout, dropout):
+        with tf.variable_scope('word_embedding'):
+            model = gensim.models.KeyedVectors.load_word2vec_format(EMBED_LOC, binary=False)
+            embed_init = get_embeddings(model, self.vocab, WORD_EMBED_DIM)
+            _word_embeddings = tf.get_variable('embeddings', initializer=embed_init, trainable= True, regularizer=self.regularizer)
+            #OOV pad
+            zero_pad = tf.zeros([1, WORD_EMBED_DIM])
+            word_embeddings = tf.concat([zero_pad, _word_embeddings], axis=0)
+            pos1_embeddings = tf.get_variable('pos1_embeddings', [MAX_POS, POS_EMBED_DIM],
+                                              initializer=tf.contrib.layers.xavier_initializer(), trainable=True,
+                                              regularizer=self.regularizer)
+            pos2_embeddings = tf.get_variable('pos2_embeddings', [MAX_POS, POS_EMBED_DIM],
+                                              initializer=tf.contrib.layers.xavier_initializer(), trainable=True,
+                                              regularizer=self.regularizer)
+
+            word_embeded = tf.nn.embedding_lookup(word_embeddings, input_x)
+            pos1_embeded = tf.nn.embedding_lookup(pos1_embeddings, input_pos1)
+            pos2_embeded = tf.nn.embedding_lookup(pos2_embeddings, input_pos2)
+            embeds = tf.concat([word_embeded, pos1_embeded, pos2_embeded], axis=2)
+
+        with tf.variable_scope('Bi_rnn'):
+            fw_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.rnn_dim, name='FW_GRU'),
+                                                    output_keep_prob=rec_dropout)
+            bk_cell = tf.contrib.rnn.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.rnn_dim, name='BW_GRU'),
+                                                    output_keep_prob=rec_dropout)
+            val, state = tf.nn.bidirectional_dynamic_rnn(fw_cell, bk_cell, embeds, sequence_length=x_len,
+                                                         dtype=tf.float32)
+            hidden_states = tf.concat((val[0], val[1]), axis=2)
+            rnn_output_dim = self.rnn_dim * 2
+
+        with tf.variable_scope('dep_predictions'):
+            arc_dep_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_dep_hidden')
+            arc_head_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_head_hidden')
+            # activation
+            arc_dep_hidden = tf.nn.relu(arc_dep_hidden)
+            arc_head_hidden = tf.nn.relu(arc_head_hidden)
+
+            # dropout
+            arc_dep_hidden = Dropout(arc_dep_hidden, keep_prob=0.8)
+            arc_head_hidden = Dropout(arc_head_hidden, keep_prob=0.8)
+
+            # bilinear classifier excluding the final dot product
+            arc_head = tf.layers.dense(arc_head_hidden, self.dep_proj_dim, name='arc_head')
             W = tf.get_variable('shared_W', shape=[self.proj_dim, 1,
                                                    self.dep_proj_dim],
-                                initializer=tf.contrib.layers.xavier_initializer())
+                                initializer=tf.contrib.layers.xavier_initializer(), regularizer=self.regularizer)
             arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
             shape = tf.shape(arc_dep)
             arc_dep = tf.reshape(arc_dep, [shape[0], -1, self.dep_proj_dim])
@@ -419,6 +420,8 @@ class NERModel(ModelDesc):
             hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
             tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
 
+        hr_out = Dropout(hr_out, keep_prob=0.8)
+        tr_out = Dropout(tr_out, keep_prob=0.8)
         # get ner accuracy
         ner_logits = tf.nn.softmax(hr_out)
         ner_pred = tf.argmax(ner_logits, axis=1)
@@ -431,7 +434,7 @@ class NERModel(ModelDesc):
         tail_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=tr_out, labels=tail_label))
         dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=dep_labels)
         dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
-        loss = 0.5 * dp_loss + 0.25 * head_loss + 0.25 * tail_loss
+        loss = 0.3 * dp_loss + 0.35 * head_loss + 0.35 * tail_loss
         if self.regularizer is not None:
             loss += tf.contrib.layers.apply_regularization(self.regularizer,
                                                            tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
@@ -440,10 +443,10 @@ class NERModel(ModelDesc):
         return loss
 
     def optimizer(self):
-        lr = tf.get_variable('learning_rate', initializer=self.lr, trainable=False)
+        lr = tf.get_variable('learning_rate', initializer=0.0001, trainable=False)
         opt = tf.train.AdamOptimizer(lr)
         return optimizer.apply_grad_processors(
-            opt, [GlobalNormClip(5), SummaryGradient()])
+            opt, [GlobalNormClip(5)])
 
 
 class Model(ModelDesc):
@@ -530,7 +533,7 @@ class Model(ModelDesc):
             # bilinear classifier excluding the final dot product
             arc_head = tf.layers.dense(arc_head_hidden, self.dep_proj_dim, name='arc_head')
             W = tf.get_variable('shared_W', shape=[self.proj_dim, 1,
-                                                   self.dep_proj_dim])
+                                                   self.dep_proj_dim], regularizer=self.regularizer)
             arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
             shape = tf.shape(arc_dep)
             arc_dep = tf.reshape(arc_dep, [shape[0], -1, self.dep_proj_dim])
@@ -798,7 +801,7 @@ def evaluate(model, model_path, data_path, batchsize):
     y_scores = np.array([e[1:] for e in logit_list]).reshape((-1))
     y_true = np.array([e[1:] for e in label_list]).reshape((-1))
 
-    if data_path.startswith('./mdb/pn'):
+    if data_path.startswith('./mdb100/pn'):
         allprob = np.reshape(np.array(y_scores), (-1))
         allans = np.reshape(y_true, (-1))
         order = np.argsort(-allprob)
@@ -865,8 +868,10 @@ if __name__ == '__main__':
     parser.add_argument('-gpu', dest='gpu', default='0', help='gpu to use')
     parser.add_argument('-l2', dest='l2', default=1e-4, type=float, help='l2 regularization')
     parser.add_argument('-seed', dest='seed', default=1234, type=int, help='seed for randomization')
-    parser.add_argument('-rnn_dim', dest='rnn_dim', default=128, type=int, help='hidden state dimension of Bi-RNN')
-    parser.add_argument('-gcn_dim', dest='gcn_dim', default=256, type=int, help='hidden state dimension of GCN')
+    parser.add_argument('-rnn_dim', dest='rnn_dim', default=200, type=int, help='hidden state dimension of Bi-RNN')
+    parser.add_argument('-gcn_dim', dest='gcn_dim', default=400, type=int, help='hidden state dimension of GCN')
+    parser.add_argument('-proj_dim', dest='proj_dim', default=512, type=int,
+                        help='projection size for GRUs and hidden layers')
     parser.add_argument('-dep_proj_dim', dest='dep_proj_dim', default=128, type=int,
                         help='size of the representations used in the bilinear classifier for parsing')
     parser.add_argument('-coe', dest='coe', default=0.3, type=float, help='value for loss addition')
@@ -903,65 +908,67 @@ if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
     step = int(293142 / BATCH_SIZE)
+    # set seed
+    tf.set_random_seed(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+
     if args.command == 'DP':
-        # set seed
-        tf.set_random_seed(args.seed)
-        random.seed(args.seed)
-        np.random.seed(args.seed)
+
         # train
-        ds = getdata('./mdb/train.mdb', BATCH_SIZE, True)
-        dss = getdata('./mdb/test.mdb', BATCH_SIZE, False)
+        ds = getdata('./mdb100/train.mdb', BATCH_SIZE, True)
+        dss = getdata('./mdb100/test.mdb', BATCH_SIZE, False)
         dp_config = dp_config(ds, dss, args)
         launch_train_with_config(dp_config, SimpleTrainer())
 
     elif args.command == 'NER':
-        ds = getdata('./mdb/train.mdb', BATCH_SIZE, True)
-        dss = getdata('./mdb/test.mdb', BATCH_SIZE, False)
+        ds = getdata('./mdb100/train.mdb', BATCH_SIZE, True)
+        dss = getdata('./mdb100/test.mdb', BATCH_SIZE, False)
         # resume
         if args.previous_model:
             current_epoch = args.previous_model // step
-            load_path = './train_log/edr15:{}/model-{}'.format(name, args.previous_model)
+            load_path = './train_log/edr_step:{}/model-{}'.format(name, args.previous_model)
             ner_config = ner_train(ds, dss, load_path, args, current_epoch, args.add_epochs)
             launch_train_with_config(ner_config, SimpleTrainer())
         else:
             current_step = step * args.pre_epochs
-            load_path = './train_log/edr15:{}/model-{}'.format(name, current_step)
+            load_path = './train_log/edr_step:{}/model-{}'.format(name, current_step)
             ner_config = ner_train(ds, dss, load_path, args, args.pre_epochs, args.epochs)
             launch_train_with_config(ner_config, SimpleTrainer())
 
     elif args.command == 'RE':
-        ds = getdata('./mdb/train.mdb', BATCH_SIZE, True)
-        dss = getdata('./mdb/test.mdb', BATCH_SIZE, False)
+        ds = getdata('./mdb100/train.mdb', BATCH_SIZE, True)
+        dss = getdata('./mdb100/test.mdb', BATCH_SIZE, False)
         # resume
         if args.previous_model:
             current_epoch = args.previous_model // step
-            load_path = './train_log/edr15:{}/model-{}'.format(name, args.previous_model)
+            load_path = './train_log/edr_step:{}/model-{}'.format(name, args.previous_model)
             re_config = re_train(ds, dss, load_path, args, current_epoch, args.add_epochs)
             launch_train_with_config(re_config, SimpleTrainer())
         else:
             current_step = step * args.pre_epochs
-            load_path = './train_log/edr15:{}/model-{}'.format(name, current_step)
+            load_path = './train_log/edr_step:{}/model-{}'.format(name, current_step)
             re_config = re_train(ds, dss, load_path, args, args.pre_epochs, args.epochs)
             launch_train_with_config(re_config, SimpleTrainer())
 
     elif args.command == 'eval':
         # predict
         if args.best_model:
-            test_path = './mdb/test.mdb'
-            best_model_path = os.path.join('./train_log/edr15:{}/'.format(name), 'model-' + str(args.best_model))
+            test_path = './mdb100/test.mdb'
+            best_model_path = os.path.join('./train_log/edr_step:{}/'.format(name), 'model-' + str(args.best_model))
             p, r, f1, aur, p_, r_ = evaluate(Model(args), best_model_path, test_path, BATCH_SIZE)
-            plotPRCurve(p_, r_, './train_log/edr15:{}'.format(name))
-            with open('./train_log/edr15:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
+            plotPRCurve(p_, r_, './train_log/edr_step:{}'.format(name))
+            with open('./train_log/edr_step:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
                 f.write('precision:\t{}\nrecall:\t{}\nf1:\t{}\nauc:\t{}'.format(p, r, f1, aur))
                 f.close()
         else:
-            with open('./train_log/edr15:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
+            with open('./train_log/edr_step:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
                 f.write(name+'\t')
-                for model in [str(step * (2 + 1) + i * step) for i in range(8)]:
+                for model in [str(step * (3 + 1) + i * step) for i in range(3)]:
                     f.write(model + '\t')
                     for data in ['pn1', 'pn2', 'pn3']:
-                        data_path = './mdb/{}.mdb'.format(data)
-                        p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr15:{}/'.format(name),
+                        data_path = './mdb100/{}.mdb'.format(data)
+                        p100, p200, p300 = evaluate(Model(args), os.path.join('./train_log/edr_step:{}/'.format(name),
                                                                               'model-' + model), data_path, BATCH_SIZE)
                         logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))
                         line = "{:.3f}\t{:.3f}\t{:.3f}\t".format(p100, p200, p300)
