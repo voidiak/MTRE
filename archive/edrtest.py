@@ -1,7 +1,7 @@
-from helper1 import *
+from archive.helper1 import *
 from six.moves import range
 from tensorpack import *
-from tensorpack.tfutils.gradproc import GlobalNormClip, SummaryGradient
+from tensorpack.tfutils.gradproc import GlobalNormClip
 from tensorpack import ProxyDataFlow
 from tensorpack.dataflow import LMDBSerializer, MultiProcessRunnerZMQ
 from tensorpack.tfutils import optimizer
