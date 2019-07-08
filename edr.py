@@ -753,7 +753,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-gpu', dest='gpu', default='0', help='gpu to use')
     parser.add_argument('-l2', dest='l2', default=1e-4, type=float, help='l2 regularization')
-    parser.add_argument('-seed', dest='seed', default=1234, required=True, type=int, help='seed for randomization')
+    parser.add_argument('-seed', dest='seed', default=15, type=int, help='seed for randomization')
     parser.add_argument('-rnn_dim', dest='rnn_dim', default=180, type=int, help='hidden state dimension of Bi-RNN')
     parser.add_argument('-gcn_dim', dest='gcn_dim', default=360, type=int, help='hidden state dimension of GCN')
     parser.add_argument('-proj_dim', dest='proj_dim', default=256, type=int,

@@ -219,9 +219,11 @@ class DPModel(ModelDesc):
         dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=dep_labels)
         dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
         loss = dp_loss
-        if self.regularizer is not None:
-            loss += tf.contrib.layers.apply_regularization(self.regularizer,
-                                                           tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+        # if self.regularizer is not None:
+        #     loss += tf.contrib.layers.apply_regularization(self.regularizer,
+        #                                                    tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+        add_l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables()])
+        loss += 1e-4 * add_l2
         loss = tf.identity(loss, name='total_loss')
         summary.add_moving_summary(loss, dep_accuracy)
         return loss
@@ -435,15 +437,17 @@ class NERModel(ModelDesc):
         dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=dep_labels)
         dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
         loss = 0.3 * dp_loss + 0.35 * head_loss + 0.35 * tail_loss
-        if self.regularizer is not None:
-            loss += tf.contrib.layers.apply_regularization(self.regularizer,
-                                                           tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+        # if self.regularizer is not None:
+        #     loss += tf.contrib.layers.apply_regularization(self.regularizer,
+        #                                                    tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+        add_l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables()])
+        loss += 1e-4 * add_l2
         loss = tf.identity(loss, name='total_loss')
         summary.add_moving_summary(loss, ner_accuracy, dep_accuracy)
         return loss
 
     def optimizer(self):
-        lr = tf.get_variable('learning_rate', initializer=0.0001, trainable=False)
+        lr = tf.get_variable('learning_rate', initializer=0.0005, trainable=False)
         opt = tf.train.AdamOptimizer(lr)
         return optimizer.apply_grad_processors(
             opt, [GlobalNormClip(5)])
@@ -695,10 +699,11 @@ class Model(ModelDesc):
         dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
         re_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=re_out, labels=input_y))
         loss = (1 - self.coe) * re_loss + self.coe * (0.35 * head_loss + 0.35 * tail_loss + 0.3 * dp_loss)
-        if self.regularizer is not None:
-            loss += tf.contrib.layers.apply_regularization(self.regularizer,
-                                                           tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
-
+        # if self.regularizer is not None:
+        #     loss += tf.contrib.layers.apply_regularization(self.regularizer,
+        #                                                    tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
+        add_l2 = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables()])
+        loss += 1e-4 * add_l2
         loss = tf.identity(loss, name='total_loss')
         summary.add_moving_summary(loss, re_accuracy)
         return loss
