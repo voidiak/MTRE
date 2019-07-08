@@ -27,10 +27,10 @@ def get_embeddings(model, wrd_list, embed_dims):
 
 
 if __name__ == '__main__':
-    embed_loc = '/data/MLRE-NG-archive/glove/glove.6B.50d_word2vec.txt'
-    data = pickle.load(open('/data/MLRE-NG/PKL/dict.pkl', 'rb'))
-    embed_path = '/data/MLRE-NG/embeddings.pkl'
-    voc_path = '/data/MLRE-NG/vocab.pkl'
+    embed_loc = '/data/MTRE-archive/glove/glove.6B.50d_word2vec.txt'
+    data = pickle.load(open('/data/MTRE/PKL/dict.pkl', 'rb'))
+    embed_path = '/data/MTRE/embeddings.pkl'
+    voc_path = '/data/MTRE/vocab.pkl'
     voc2id = data['voc2id']
 
     # get word list

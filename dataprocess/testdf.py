@@ -89,7 +89,7 @@ class getbatch(ProxyDataFlow):
         return temp
 
 if __name__ == '__main__':
-    path1='/data/MLRE-NG/mdb/train.mdb'
+    path1='/data/MTRE/mdb/train.mdb'
     path2='/data/mdb/test.mdb'
     ds = LMDBSerializer.load(path1, shuffle=True)
     dse = getbatch(ds, 200, True)

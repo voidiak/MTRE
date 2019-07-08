@@ -411,7 +411,7 @@ param_data = {
     'e_type2id': type2id
 }
 print('writing data')
-pickle.dump(test_data, open('/data/MLRE-NG/PKL/test_r.pkl', 'wb'))
+pickle.dump(test_data, open('/data/MTRE/PKL/test_r.pkl', 'wb'))
 
 def getPNdata(data):
     # 为计算p@n准备数据
@@ -465,7 +465,7 @@ def getPNdata(data):
 
 
 p1_data, p2_data, p3_data = getPNdata(test_data)
-pickle.dump(p1_data, open('/data/MLRE-NG/PKL/pn1_r.pkl', 'wb'))
-pickle.dump(p2_data, open('/data/MLRE-NG/PKL/pn2_r.pkl', 'wb'))
-pickle.dump(p3_data, open('/data/MLRE-NG/PKL/pn3_r.pkl', 'wb'))
+pickle.dump(p1_data, open('/data/MTRE/PKL/pn1_r.pkl', 'wb'))
+pickle.dump(p2_data, open('/data/MTRE/PKL/pn2_r.pkl', 'wb'))
+pickle.dump(p3_data, open('/data/MTRE/PKL/pn3_r.pkl', 'wb'))
 print('writing over')

@@ -30,6 +30,6 @@ def splitBags(data, chunk_size):
 
 
 if __name__ == '__main__':
-    data=pickle.load(open('/data/MLRE-NG/PKL/pn1_r.pkl','rb'))
+    data=pickle.load(open('/data/MTRE/PKL/pn1_r.pkl','rb'))
     print(len(data))
     data_splited=splitBags(data)

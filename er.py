@@ -20,7 +20,7 @@ POS_EMBED_DIM = 5
 ENTITY_TYPE_CLASS = 107
 RELATION_TYPE_CLASS = 53
 MAX_POS = (60 + 1) * 2 + 1
-EMBED_LOC = '/data/MLRE-NG-archive/glove/glove.6B.50d_word2vec.txt'
+EMBED_LOC = '/data/MTRE-archive/glove/glove.6B.50d_word2vec.txt'
 BASELINE_LOC = './baseline/'
 VOCAB_LOC = './vocab.pkl'
 
