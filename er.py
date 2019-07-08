@@ -239,63 +239,15 @@ class WarmupModel(ModelDesc):
         ner_accuracy_ = tf.cast(tf.equal(ner_pred, ner_actual), tf.float32, name='ner_accu')
         ner_accuracy = tf.reduce_mean(ner_accuracy_)
 
-        with tf.variable_scope('dep_predictions'):
-            arc_dep_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_dep_hidden')
-            arc_head_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_head_hidden')
-            # activation
-            arc_dep_hidden = tf.nn.relu(arc_dep_hidden)
-            arc_head_hidden = tf.nn.relu(arc_head_hidden)
-
-            # dropout
-            arc_dep_hidden = Dropout(arc_dep_hidden, keep_prob=dropout)
-            arc_head_hidden = Dropout(arc_head_hidden, keep_prob=dropout)
-
-            # bilinear classifier excluding the final dot product
-            arc_head = tf.layers.dense(arc_head_hidden, self.dep_proj_dim, name='arc_head')
-            W = tf.get_variable('shared_W', shape=[self.proj_dim, 1,
-                                                   self.dep_proj_dim],
-                                initializer=tf.contrib.layers.xavier_initializer())
-            arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
-            shape = tf.shape(arc_dep)
-            arc_dep = tf.reshape(arc_dep, [shape[0], -1, self.dep_proj_dim])
-
-            # apply the transformer trick to prevent dot products from getting too large
-            scale = np.power(self.dep_proj_dim, 0.25).astype('float32')
-            scale = tf.get_variable('scale', initializer=scale, dtype=tf.float32)
-            arc_dep /= scale
-            arc_head /= scale
-
-            # compute the scores for each candidate arc
-            word_score = tf.matmul(arc_head, arc_dep, transpose_b=True)
-            arc_scores = word_score
-
-            # disallow the model from making impossible predictions
-            mask_shape = tf.shape(dep_mask)
-            dep_mask_ = tf.tile(tf.expand_dims(dep_mask, 1), [1, mask_shape[1], 1])
-            arc_scores += (dep_mask_ - 1) * 100
-            nn_dep_out = arc_scores
-
-        dep_labels = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
-        # get dep accuracy
-        dep_logits = tf.nn.softmax(nn_dep_out)
-        dep_pred = tf.reshape(tf.argmax(dep_logits, axis=-1), [-1])
-        dep_actual = tf.reshape(tf.argmax(dep_labels, axis=-1), [-1])
-        y_mask = tf.cast(tf.reshape(dep_mask, [-1]), dtype=tf.bool)
-        pred_masked = tf.boolean_mask(dep_pred, y_mask)
-        actual_masked = tf.boolean_mask(dep_actual, y_mask)
-        dep_accuracy_ = tf.cast(tf.equal(pred_masked, actual_masked), tf.float32, name='dep_accu')
-        dep_accuracy = tf.reduce_mean(dep_accuracy_)
         # use sigmoid loss multi-label classification
         head_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=hr_out, labels=head_label))
         tail_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=tr_out, labels=tail_label))
-        dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=dep_labels)
-        dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
-        loss = 0.3 * dp_loss + 0.35 * head_loss + 0.35 * tail_loss
+        loss = 0.5 * head_loss + 0.5 * tail_loss
         if self.regularizer is not None:
             loss += tf.contrib.layers.apply_regularization(self.regularizer,
                                                            tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
         loss = tf.identity(loss, name='total_loss')
-        summary.add_moving_summary(loss, ner_accuracy, dep_accuracy)
+        summary.add_moving_summary(loss, ner_accuracy)
         return loss
 
     def optimizer(self):
@@ -307,8 +259,6 @@ class WarmupModel(ModelDesc):
 class Model(ModelDesc):
     def __init__(self, params):
         self.rnn_dim = params.rnn_dim
-        self.proj_dim = params.proj_dim
-        self.dep_proj_dim = params.dep_proj_dim
         self.lr = params.lr
         if params.l2 == 0.0:
             self.regularizer = None
@@ -316,8 +266,6 @@ class Model(ModelDesc):
             self.regularizer = tf.contrib.layers.l2_regularizer(scale=params.l2)
         # self.embed_matrix = pickle.load(open(EMBED_LOC, 'rb'))
         self.vocab = pickle.load(open(VOCAB_LOC, 'rb'))
-        self.gcn_layers = 2
-        self.gcn_dim = params.gcn_dim
         self.coe = params.coe
 
     def inputs(self):
@@ -424,56 +372,7 @@ class Model(ModelDesc):
             head_repre_b = tf.map_fn(getHeadRepre, sent_num, dtype=tf.float32)
             tail_repre_b = tf.map_fn(getTailRepre, sent_num, dtype=tf.float32)
 
-        with tf.variable_scope('dep_predictions'):
-            # Projection 考虑现在hidden states是多个句子的串联，用cnn
-            arc_dep_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_dep_hidden')
-            arc_head_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_head_hidden')
-
-            # activation
-            arc_dep_hidden = tf.nn.relu(arc_dep_hidden)
-            arc_head_hidden = tf.nn.relu(arc_head_hidden)
-
-            # dropout
-            arc_dep_hidden = Dropout(arc_dep_hidden, keep_prob=dropout)
-            arc_head_hidden = Dropout(arc_head_hidden, keep_prob=dropout)
-
-            # bilinear classifier excluding the final dot product
-            arc_head = tf.layers.dense(arc_head_hidden, self.dep_proj_dim, name='arc_head')
-            W = tf.get_variable('shared_W', shape=[self.proj_dim, 1,
-                                                   self.dep_proj_dim])
-            arc_dep = tf.tensordot(arc_dep_hidden, W, axes=[[-1], [0]])
-            shape = tf.shape(arc_dep)
-            arc_dep = tf.reshape(arc_dep, [shape[0], -1, self.dep_proj_dim])
-
-            # apply the transformer trick to prevent dot products from getting too large
-            scale = np.power(self.dep_proj_dim, 0.25).astype('float32')
-            scale = tf.get_variable('scale', initializer=scale, dtype=tf.float32)
-            arc_dep /= scale
-            arc_head /= scale
-
-            # compute the scores for each candidate arc
-            word_score = tf.matmul(arc_head, arc_dep, transpose_b=True)
-            arc_scores = word_score
-
-        # gcn encoding dependency tree structure
-        dep_matrix = tf.nn.softmax(arc_scores)
-        gcn_matrix = tf.transpose(dep_matrix, [0, 2, 1])
-        #warning
-        gcn_matrix = gcn_matrix + tf.eye(seq_len)
-
-        with tf.variable_scope('gcn_encoder') as scope:
-            denom = tf.expand_dims(tf.reduce_sum(gcn_matrix, axis=2), axis=2) + 1
-            # gcn_mask = tf.expand_dims(
-            #     tf.equal((tf.reduce_sum(dep_matrix, axis=2) + tf.reduce_sum(dep_matrix, axis=1)), 0), axis=2)
-            for l in range(self.gcn_layers):
-                Ax = tf.matmul(gcn_matrix, hidden_states)
-                AxW = tf.layers.dense(Ax, self.gcn_dim)
-                AxW = AxW + tf.layers.dense(hidden_states, self.gcn_dim)
-                AxW = AxW / denom
-                gAxW = tf.nn.relu(AxW)
-                hidden_states = Dropout(gAxW, keep_prob=0.5) if l < self.gcn_layers - 1 else gAxW
-
-        de_out_dim = self.gcn_dim
+        de_out_dim = rnn_output_dim
 
         # word attention
         with tf.variable_scope('word_attention') as scope:
@@ -547,10 +446,8 @@ class Model(ModelDesc):
                                                                            labels=head_label))
         tail_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=tr_out, labels=tail_label))
 
-        dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=arc_scores, labels=label_y)
-        dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
         re_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=re_out, labels=input_y))
-        loss = (1 - self.coe) * re_loss + self.coe * (0.35 * head_loss + 0.35 * tail_loss + 0.3 * dp_loss)
+        loss = (1 - self.coe) * re_loss + self.coe * (0.5 * head_loss + 0.5 * tail_loss)
         if self.regularizer is not None:
             loss += tf.contrib.layers.apply_regularization(self.regularizer,
                                                            tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
@@ -581,8 +478,7 @@ def get_config(ds_train, ds_test, params):
             StatMonitorParamSetter('learning_rate', 'total_loss',
                                    lambda x: x * 0.2, 0, 5),
             PeriodicTrigger(
-                InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('ner_accu', 'ner_accuracy'),
-                                          ClassificationError('dep_accu', 'dep_accuracy')]),
+                InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('ner_accu', 'ner_accuracy')]),
                 every_k_epochs=1),
             MovingAverageSummary(),
             MergeAllSummaries(),
@@ -764,8 +660,8 @@ if __name__ == '__main__':
                         help='size of the representations used in the bilinear classifier for parsing')
     parser.add_argument('-coe', dest='coe', default=0.3, type=float, help='value for loss addition')
     parser.add_argument('-lr', dest='lr', default=0.001, type=float, help='learning rate')
-    parser.add_argument('-pre_epochs', dest='pre_epochs', default=3, type=int, help='pretraining epochs')
-    parser.add_argument('-epochs', dest='epochs', default=2, type=int, help='epochs to train/predict')
+    parser.add_argument('-pre_epochs', dest='pre_epochs', default=10, type=int, help='pretraining epochs')
+    parser.add_argument('-epochs', dest='epochs', default=10, type=int, help='epochs to train/predict')
     parser.add_argument('-batch_size', dest='batch_size', default=200, type=int, help='batch size')
     subparsers = parser.add_subparsers(title='command', dest='command')
     parser_pretrain = subparsers.add_parser('pretrain')

@@ -174,71 +174,6 @@ class WarmupModel(ModelDesc):
             hidden_states = tf.concat((val[0], val[1]), axis=2)
             rnn_output_dim = self.rnn_dim * 2
 
-        with tf.variable_scope('entity_type_classification'):
-            entity_query = tf.get_variable('head_query', [rnn_output_dim, 1],
-                                           initializer=tf.contrib.layers.xavier_initializer())
-            # 以句子中的词index建立索引
-            s_idx = tf.range(0, total_sents, 1, dtype=tf.int32)
-            head_index = tf.concat(
-                [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(head_pos, [total_sents, 1])], axis=-1)
-            tail_index = tf.concat(
-                [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(tail_pos, [total_sents, 1])], axis=-1)
-            # add null word vector
-            word_hidden_states = tf.concat([tf.zeros([total_sents, 1, rnn_output_dim]), hidden_states], axis=1)
-            # extract head/tail entity's hidden state. size (total_sents,hidden_dim)
-            head_repre_s = tf.gather_nd(word_hidden_states, head_index, name='head_entity_h_in_sentence')
-            tail_repre_s = tf.gather_nd(word_hidden_states, tail_index, name='tail_entity_h_in_sentence')
-
-            # 计算一个包中head实体的多个向量的att和
-            def getHeadRepre(num):
-                num_sents = num[1] - num[0]
-                bag_sents = head_repre_s[num[0]:num[1]]
-
-                head_att_weights = tf.nn.softmax(
-                    tf.reshape(tf.matmul(tf.tanh(bag_sents), entity_query), [num_sents]))
-
-                head_repre_ = tf.reshape(
-                    tf.matmul(
-                        tf.reshape(head_att_weights, [1, num_sents]),
-                        bag_sents
-                    ), [rnn_output_dim]
-                )
-                return head_repre_
-
-            # 计算一个包中tail实体的多个向量的att和
-            def getTailRepre(num):
-                num_sents = num[1] - num[0]
-                bag_sents = tail_repre_s[num[0]:num[1]]
-
-                tail_att_weights = tf.nn.softmax(
-                    tf.reshape(tf.matmul(tf.tanh(bag_sents), entity_query), [num_sents]))
-
-                tail_repre_ = tf.reshape(
-                    tf.matmul(
-                        tf.reshape(tail_att_weights, [1, num_sents]),
-                        bag_sents
-                    ), [rnn_output_dim]
-                )
-                return tail_repre_
-
-            # 一个batch中实体的向量表示dimension(batchsize,rnn_output_dim)
-            head_repre_b = tf.map_fn(getHeadRepre, sent_num, dtype=tf.float32)
-            tail_repre_b = tf.map_fn(getTailRepre, sent_num, dtype=tf.float32)
-
-        with tf.variable_scope('entity_fully_connected_layer'):
-            w_e = tf.get_variable('w', [rnn_output_dim, ENTITY_TYPE_CLASS],
-                                  initializer=tf.contrib.layers.xavier_initializer())
-            b_e = tf.get_variable('b', initializer=np.zeros([ENTITY_TYPE_CLASS]).astype(np.float32))
-            hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
-            tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
-
-        # get ner accuracy
-        ner_logits = tf.nn.softmax(hr_out)
-        ner_pred = tf.argmax(ner_logits, axis=1)
-        ner_actual = tf.argmax(head_label, axis=1)
-        ner_accuracy_ = tf.cast(tf.equal(ner_pred, ner_actual), tf.float32, name='ner_accu')
-        ner_accuracy = tf.reduce_mean(ner_accuracy_)
-
         with tf.variable_scope('dep_predictions'):
             arc_dep_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_dep_hidden')
             arc_head_hidden = tf.layers.dense(hidden_states, self.proj_dim, name='arc_head_hidden')
@@ -286,16 +221,14 @@ class WarmupModel(ModelDesc):
         dep_accuracy_ = tf.cast(tf.equal(pred_masked, actual_masked), tf.float32, name='dep_accu')
         dep_accuracy = tf.reduce_mean(dep_accuracy_)
         # use sigmoid loss multi-label classification
-        head_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=hr_out, labels=head_label))
-        tail_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=tr_out, labels=tail_label))
         dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=nn_dep_out, labels=dep_labels)
         dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
-        loss = 0.3 * dp_loss + 0.35 * head_loss + 0.35 * tail_loss
+        loss = dp_loss
         if self.regularizer is not None:
             loss += tf.contrib.layers.apply_regularization(self.regularizer,
                                                            tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
         loss = tf.identity(loss, name='total_loss')
-        summary.add_moving_summary(loss, ner_accuracy, dep_accuracy)
+        summary.add_moving_summary(loss, dep_accuracy)
         return loss
 
     def optimizer(self):
@@ -372,57 +305,6 @@ class Model(ModelDesc):
                                                          dtype=tf.float32)
             hidden_states = tf.concat((val[0], val[1]), axis=2)
             rnn_output_dim = self.rnn_dim * 2
-
-        with tf.variable_scope('entity_type_classification'):
-            entity_query = tf.get_variable('entity_query', [rnn_output_dim, 1],
-                                           initializer=tf.contrib.layers.xavier_initializer())
-            # 以句子中的词index建立索引
-            s_idx = tf.range(0, total_sents, 1, dtype=tf.int32)
-            head_index = tf.concat(
-                [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(head_pos, [total_sents, 1])], axis=-1)
-            tail_index = tf.concat(
-                [tf.reshape(s_idx, [total_sents, 1]), tf.reshape(tail_pos, [total_sents, 1])], axis=-1)
-            # add null word vector
-            word_hidden_states = tf.concat([tf.zeros([total_sents, 1, rnn_output_dim]), hidden_states], axis=1)
-            # extract head/tail entity's hidden state. size (total_sents,hidden_dim)
-            head_repre_s = tf.gather_nd(word_hidden_states, head_index, name='head_entity_h_in_sentence')
-            tail_repre_s = tf.gather_nd(word_hidden_states, tail_index, name='tail_entity_h_in_sentence')
-
-            # 计算一个包中head实体的多个向量的att和
-            def getHeadRepre(num):
-                num_sents = num[1] - num[0]
-                bag_sents = head_repre_s[num[0]:num[1]]
-
-                head_att_weights = tf.nn.softmax(
-                    tf.reshape(tf.matmul(tf.tanh(bag_sents), entity_query), [num_sents]))
-
-                head_repre_ = tf.reshape(
-                    tf.matmul(
-                        tf.reshape(head_att_weights, [1, num_sents]),
-                        bag_sents
-                    ), [rnn_output_dim]
-                )
-                return head_repre_
-
-            # 计算一个包中tail实体的多个向量的att和
-            def getTailRepre(num):
-                num_sents = num[1] - num[0]
-                bag_sents = tail_repre_s[num[0]:num[1]]
-
-                tail_att_weights = tf.nn.softmax(
-                    tf.reshape(tf.matmul(tf.tanh(bag_sents), entity_query), [num_sents]))
-
-                tail_repre_ = tf.reshape(
-                    tf.matmul(
-                        tf.reshape(tail_att_weights, [1, num_sents]),
-                        bag_sents
-                    ), [rnn_output_dim]
-                )
-                return tail_repre_
-
-            # 一个batch中实体的向量表示 dimension(batchsize,rnn_output_dim)
-            head_repre_b = tf.map_fn(getHeadRepre, sent_num, dtype=tf.float32)
-            tail_repre_b = tf.map_fn(getTailRepre, sent_num, dtype=tf.float32)
 
         with tf.variable_scope('dep_predictions'):
             # Projection 考虑现在hidden states是多个句子的串联，用cnn
@@ -518,8 +400,6 @@ class Model(ModelDesc):
 
             bag_repre = tf.map_fn(getSentenceAtt, sent_num, dtype=tf.float32)
 
-        bag_repre = tf.concat([bag_repre, head_repre_b, tail_repre_b], axis=-1)
-        de_out_dim = de_out_dim + 4 * self.rnn_dim
 
         with tf.variable_scope('fully_connected_layer') as scope:
             w = tf.get_variable('w', [de_out_dim, RELATION_TYPE_CLASS],
@@ -534,23 +414,14 @@ class Model(ModelDesc):
         re_accuracy_ = tf.cast(tf.equal(re_pred, re_actual), tf.float32, name='re_accu')
         re_accuracy = tf.reduce_mean(re_accuracy_)
 
-        with tf.variable_scope('entity_fully_connected_layer') as scope:
-            w_e = tf.get_variable('w', [rnn_output_dim, ENTITY_TYPE_CLASS],
-                                  initializer=tf.contrib.layers.xavier_initializer())
-            b_e = tf.get_variable('b', initializer=np.zeros([ENTITY_TYPE_CLASS]).astype(np.float32))
-            hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
-            tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
 
         label_y = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
         # use sigmoid loss multi-label classification
-        head_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=hr_out,
-                                                                           labels=head_label))
-        tail_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=tr_out, labels=tail_label))
 
         dep_ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=arc_scores, labels=label_y)
         dp_loss = tf.reduce_sum(dep_mask * dep_ce) / tf.to_float(tf.reduce_sum(dep_mask))
         re_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(logits=re_out, labels=input_y))
-        loss = (1 - self.coe) * re_loss + self.coe * (0.35 * head_loss + 0.35 * tail_loss + 0.3 * dp_loss)
+        loss = (1 - self.coe) * re_loss + self.coe * (dp_loss)
         if self.regularizer is not None:
             loss += tf.contrib.layers.apply_regularization(self.regularizer,
                                                            tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
@@ -581,8 +452,7 @@ def get_config(ds_train, ds_test, params):
             StatMonitorParamSetter('learning_rate', 'total_loss',
                                    lambda x: x * 0.2, 0, 5),
             PeriodicTrigger(
-                InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('ner_accu', 'ner_accuracy'),
-                                          ClassificationError('dep_accu', 'dep_accuracy')]),
+                InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('dep_accu', 'dep_accuracy')]),
                 every_k_epochs=1),
             MovingAverageSummary(),
             MergeAllSummaries(),
@@ -764,8 +634,8 @@ if __name__ == '__main__':
                         help='size of the representations used in the bilinear classifier for parsing')
     parser.add_argument('-coe', dest='coe', default=0.3, type=float, help='value for loss addition')
     parser.add_argument('-lr', dest='lr', default=0.001, type=float, help='learning rate')
-    parser.add_argument('-pre_epochs', dest='pre_epochs', default=3, type=int, help='pretraining epochs')
-    parser.add_argument('-epochs', dest='epochs', default=2, type=int, help='epochs to train/predict')
+    parser.add_argument('-pre_epochs', dest='pre_epochs', default=10, type=int, help='pretraining epochs')
+    parser.add_argument('-epochs', dest='epochs', default=10, type=int, help='epochs to train/predict')
     parser.add_argument('-batch_size', dest='batch_size', default=200, type=int, help='batch size')
     subparsers = parser.add_subparsers(title='command', dest='command')
     parser_pretrain = subparsers.add_parser('pretrain')
