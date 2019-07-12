@@ -20,7 +20,7 @@ POS_EMBED_DIM = 5
 ENTITY_TYPE_CLASS = 107
 RELATION_TYPE_CLASS = 53
 MAX_POS = (60 + 1) * 2 + 1
-EMBED_LOC = '/data/MTRE-archive/glove/glove.6B.50d_word2vec.txt'
+EMBED_LOC = './glove.6B.50d_word2vec.txt'
 BASELINE_LOC = './baseline/'
 VOCAB_LOC = './vocab.pkl'
 
@@ -209,25 +209,32 @@ class Model(ModelDesc):
             word_score = tf.matmul(arc_head, arc_dep, transpose_b=True)
             arc_scores = word_score
 
+            # disallow the model from making impossible predictions
+            mask_shape = tf.shape(dep_mask)
+            dep_mask_ = tf.tile(tf.expand_dims(dep_mask, 1), [1, mask_shape[1], 1])
+            arc_scores += (dep_mask_ - 1) * 100
+
         # gcn encoding dependency tree structure
         dep_matrix = tf.nn.softmax(arc_scores)
         gcn_matrix = tf.transpose(dep_matrix, [0, 2, 1])
-        #warning
         gcn_matrix = gcn_matrix + tf.eye(seq_len)
+
+        hidden_states_ = hidden_states
 
         with tf.variable_scope('gcn_encoder') as scope:
             denom = tf.expand_dims(tf.reduce_sum(gcn_matrix, axis=2), axis=2) + 1
             # gcn_mask = tf.expand_dims(
             #     tf.equal((tf.reduce_sum(dep_matrix, axis=2) + tf.reduce_sum(dep_matrix, axis=1)), 0), axis=2)
             for l in range(self.gcn_layers):
-                Ax = tf.matmul(gcn_matrix, hidden_states)
+                Ax = tf.matmul(gcn_matrix, hidden_states_)
                 AxW = tf.layers.dense(Ax, self.gcn_dim)
-                AxW = AxW + tf.layers.dense(hidden_states, self.gcn_dim)
+                AxW = AxW + tf.layers.dense(hidden_states_, self.gcn_dim)
                 AxW = AxW / denom
                 gAxW = tf.nn.relu(AxW)
-                hidden_states = Dropout(gAxW, keep_prob=0.5) if l < self.gcn_layers - 1 else gAxW
+                hidden_states_ = Dropout(gAxW, keep_prob=0.5) if l < self.gcn_layers - 1 else gAxW
 
-        de_out_dim = self.gcn_dim
+        hidden_states = tf.concat([hidden_states, hidden_states_],axis=-1)
+        de_out_dim = rnn_output_dim+ self.gcn_dim
 
         # word attention
         with tf.variable_scope('word_attention') as scope:
@@ -324,7 +331,7 @@ def get_config(ds_train, ds_test, params):
             StatMonitorParamSetter('learning_rate', 'total_loss',
                                    lambda x: x * 0.2, 0, 5),
             PeriodicTrigger(
-                InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('dep_accu', 'dep_accuracy')]),
+                InferenceRunner(ds_test, [ScalarStats('total_loss')]),
                 every_k_epochs=1),
             MovingAverageSummary(),
             MergeAllSummaries(),
@@ -516,11 +523,11 @@ if __name__ == '__main__':
         # predict
         if args.best_model:
             test_path = './mdb100/test.mdb'
-            best_model_path = os.path.join('./train_log/edr:{}/'.format(name), 'model-' + str(args.best_model))
+            best_model_path = os.path.join('./train_log/dr-tl:{}/'.format(name), 'model-' + str(args.best_model))
             p, r, f1, aur, p_, r_ ,p10_result= evaluate(Model(args), best_model_path, test_path, args.batch_size)
-            plotPRCurve(p_, r_, './train_log/edr:{}'.format(name))
-            pickle.dump({'precision': p_, 'recall': r_}, open('./train_log/edr:{}/p_r.pkl'.format(name), 'wb'))
-            with open('./train_log/edr:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
+            plotPRCurve(p_, r_, './train_log/dr-tl:{}'.format(name))
+            pickle.dump({'precision': p_, 'recall': r_}, open('./train_log/dr-tl:{}/p_r.pkl'.format(name), 'wb'))
+            with open('./train_log/dr-tl:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
                 f.write('precision:\t{}\nrecall:\t{}\nf1:\t{}\nauc:\t{}\n'.format(p, r, f1, aur))
                 f.write(name + '\n')
                 f.write('model name:' + str(args.best_model) + '\t' + '\n')
@@ -534,14 +541,14 @@ if __name__ == '__main__':
                 f.write('\n')
                 f.close()
         else:
-            with open('./train_log/edr:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
+            with open('./train_log/dr-tl:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
                 f.write(name + '\n')
-                for model in [str(step * (args.epochs + 1) + i * step) for i in
+                for model in [str((i+1) * step) for i in
                               range(args.epochs + args.add_epochs)]:
                     f.write(model + '\t')
                     for data in ['pn1', 'pn2', 'test']:
                         data_path = './mdb100/{}.mdb'.format(data)
-                        p100, p200, p300 = evaluatepn(Model(args), os.path.join('./train_log/edr:{}/'.format(name),
+                        p100, p200, p300 = evaluatepn(Model(args), os.path.join('./train_log/dr-tl:{}/'.format(name),
                                                                                 'model-' + model), data_path,
                                                       args.batch_size)
                         logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))

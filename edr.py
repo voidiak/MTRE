@@ -20,7 +20,7 @@ POS_EMBED_DIM = 5
 ENTITY_TYPE_CLASS = 107
 RELATION_TYPE_CLASS = 53
 MAX_POS = (60 + 1) * 2 + 1
-EMBED_LOC = '/data/MTRE-archive/glove/glove.6B.50d_word2vec.txt'
+EMBED_LOC = './glove.6B.50d_word2vec.txt'
 BASELINE_LOC = './baseline/'
 VOCAB_LOC = './vocab.pkl'
 
@@ -231,7 +231,8 @@ class WarmupModel(ModelDesc):
             b_e = tf.get_variable('b', initializer=np.zeros([ENTITY_TYPE_CLASS]).astype(np.float32))
             hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
             tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
-
+        hr_out = Dropout(hr_out, keep_prob=dropout)
+        tr_out = Dropout(tr_out, keep_prob=dropout)
         # get ner accuracy
         ner_logits = tf.nn.softmax(hr_out)
         ner_pred = tf.argmax(ner_logits, axis=1)
@@ -526,7 +527,7 @@ class Model(ModelDesc):
                                 initializer=tf.contrib.layers.xavier_initializer())
             b = tf.get_variable('b', initializer=np.zeros([RELATION_TYPE_CLASS]).astype(np.float32))
             re_out = tf.nn.xw_plus_b(bag_repre, w, b)
-            re_out = Dropout(re_out, keep_prob=dropout)
+            # re_out = Dropout(re_out, keep_prob=dropout)
 
         re_logits = tf.nn.softmax(re_out, name='logits')
         re_pred = tf.argmax(re_logits, axis=1, name='pred_y')
@@ -540,7 +541,8 @@ class Model(ModelDesc):
             b_e = tf.get_variable('b', initializer=np.zeros([ENTITY_TYPE_CLASS]).astype(np.float32))
             hr_out = tf.nn.xw_plus_b(head_repre_b, w_e, b_e)
             tr_out = tf.nn.xw_plus_b(tail_repre_b, w_e, b_e)
-
+        hr_out = Dropout(hr_out, keep_prob=dropout)
+        tr_out = Dropout(tr_out, keep_prob=dropout)
         label_y = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
         # use sigmoid loss multi-label classification
         head_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=hr_out,
@@ -676,9 +678,14 @@ def evaluate(model, model_path, data_path, batchsize):
     precsion, recall, f1 = calculate_prf(y_gold, y_pred)
     area_under_pr = average_precision_score(y_true, y_scores)
     # precision_, recall_, threshold = precision_recall_curve(y_true, y_scores)
-    precision_, recall_ ,p10_result= curve(y_scores, y_true, 2000)
+    precision_, recall_ ,p10_, p30_, p50_ = curve(y_scores, y_true, 2000)
+    order = np.argsort(y_scores)[::-1]
+    diff = []
+    for i in order:
+        if y_true[i] - y_scores[i] != 0:
+            diff.append(i)
 
-    return precsion, recall, f1, area_under_pr, precision_, recall_, p10_result
+    return precsion, recall, f1, area_under_pr, precision_, recall_, p10_, p30_, p50_, diff
 
 
 def curve(y_scores, y_true, num=2000):
@@ -697,15 +704,31 @@ def curve(y_scores, y_true, num=2000):
         precisions.append(precision)
         recalls.append(recall)
 
-    ppp_num = len(y_scores) // 10
-    ppp_result=0.0
-    for i in order[:ppp_num]:
-        # correct_num += 1.0 if (y_true[i] == 1) else 0
-        ppp_result+=y_scores[i]
-    ppp_result = ppp_result / ppp_num
-    logger.info('P@10%:\t{}'.format(ppp_result))
+    top10 = order[:642]
+    cnt10 = 0.0
+    for i in top10:
+        if y_true[i] == 1:
+            cnt10 += 1.0
+    p10 = cnt10 / 642
 
-    return np.array(precisions), np.array(recalls), ppp_result
+    top30 = order[:642 * 3]
+    cnt30 = 0.0
+    for i in top30:
+        if y_true[i] == 1:
+            cnt30 += 1.0
+    p30 = cnt30 / 642 / 3
+
+    top50 = order[:642 * 5]
+    cnt50 = 0.0
+    for i in top50:
+        if y_true[i] == 1:
+            cnt50 += 1.0
+
+
+    p50 = cnt50 / 642 / 5
+    logger.info('P@10%:\t{}\tP@30%:\t{}\tP@50%:\t{}\n'.format(p10, p30, p50))
+
+    return np.array(precisions), np.array(recalls), p10, p30, p50
 
 
 def calculate_prf(gold, pred):
@@ -760,7 +783,7 @@ if __name__ == '__main__':
     parser.add_argument('-gcn_dim', dest='gcn_dim', default=360, type=int, help='hidden state dimension of GCN')
     parser.add_argument('-proj_dim', dest='proj_dim', default=256, type=int,
                         help='projection size for GRUs and hidden layers')
-    parser.add_argument('-dep_proj_dim', dest='dep_proj_dim', default=64, type=int,
+    parser.add_argument('-dep_proj_dim', dest='dep_proj_dim', default=128, type=int,
                         help='size of the representations used in the bilinear classifier for parsing')
     parser.add_argument('-coe', dest='coe', default=0.3, type=float, help='value for loss addition')
     parser.add_argument('-lr', dest='lr', default=0.001, type=float, help='learning rate')
@@ -814,9 +837,10 @@ if __name__ == '__main__':
         if args.best_model:
             test_path = './mdb100/test.mdb'
             best_model_path = os.path.join('./train_log/edr:{}/'.format(name), 'model-' + str(args.best_model))
-            p, r, f1, aur, p_, r_ ,p10_result= evaluate(Model(args), best_model_path, test_path, args.batch_size)
+            p, r, f1, aur, p_, r_ ,p10_result, p30_result, p50_result, diff_result= evaluate(Model(args), best_model_path, test_path, args.batch_size)
             plotPRCurve(p_, r_, './train_log/edr:{}'.format(name))
             pickle.dump({'precision': p_, 'recall': r_}, open('./train_log/edr:{}/p_r.pkl'.format(name), 'wb'))
+            pickle.dump(diff_result,open('./train_log/edr:{}/diff_list.pkl'.format(name), 'wb'))
             with open('./train_log/edr:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
                 f.write('precision:\t{}\nrecall:\t{}\nf1:\t{}\nauc:\t{}\n'.format(p, r, f1, aur))
                 f.write(name + '\n')
@@ -827,7 +851,7 @@ if __name__ == '__main__':
                     logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))
                     line = "{}:\t{:.3f}\t{:.3f}\t{:.3f}\t\n".format(data, p100, p200, p300)
                     f.write(line)
-                f.write("p@10%:\t{}".format(p10_result))
+                f.write('P@10%:\t{}\tP@30%:\t{}\tP@50%:\t{}\n'.format(p10_result, p30_result, p50_result))
                 f.write('\n')
                 f.close()
         else:

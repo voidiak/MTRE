@@ -1,4 +1,5 @@
 from utils import *
+os.environ["TF_CPP_MIN_LOG_LEVEL"]='2'
 from six.moves import range
 from tensorpack import *
 from tensorpack.tfutils.gradproc import GlobalNormClip, SummaryGradient
@@ -20,7 +21,7 @@ POS_EMBED_DIM = 5
 ENTITY_TYPE_CLASS = 107
 RELATION_TYPE_CLASS = 53
 MAX_POS = (60 + 1) * 2 + 1
-EMBED_LOC = '/data/MTRE-archive/glove/glove.6B.50d_word2vec.txt'
+EMBED_LOC = './glove.6B.50d_word2vec.txt'
 BASELINE_LOC = './baseline/'
 VOCAB_LOC = './vocab.pkl'
 
@@ -270,8 +271,7 @@ def get_config(ds_train, ds_test, params):
             StatMonitorParamSetter('learning_rate', 'total_loss',
                                    lambda x: x * 0.2, 0, 5),
             PeriodicTrigger(
-                InferenceRunner(ds_test, [ScalarStats('total_loss'), ClassificationError('ner_accu', 'ner_accuracy'),
-                                          ClassificationError('dep_accu', 'dep_accuracy')]),
+                InferenceRunner(ds_test, [ScalarStats('total_loss')]),
                 every_k_epochs=1),
             MovingAverageSummary(),
             MergeAllSummaries(),
@@ -344,8 +344,13 @@ def evaluate(model, model_path, data_path, batchsize):
     area_under_pr = average_precision_score(y_true, y_scores)
     # precision_, recall_, threshold = precision_recall_curve(y_true, y_scores)
     precision_, recall_ ,p10_result= curve(y_scores, y_true, 2000)
-
-    return precsion, recall, f1, area_under_pr, precision_, recall_, p10_result
+    diff = []
+    wrong_predict = []
+    for i in range(len(y_pred)):
+        if y_pred[i] - y_gold[i] != 0:
+            diff.append(i)
+            wrong_predict.append(y_pred[i])
+    return precsion, recall, f1, area_under_pr, precision_, recall_, p10_result, diff, wrong_predict
 
 
 def curve(y_scores, y_true, num=2000):
@@ -427,11 +432,11 @@ if __name__ == '__main__':
     parser.add_argument('-gcn_dim', dest='gcn_dim', default=360, type=int, help='hidden state dimension of GCN')
     parser.add_argument('-proj_dim', dest='proj_dim', default=256, type=int,
                         help='projection size for GRUs and hidden layers')
-    parser.add_argument('-dep_proj_dim', dest='dep_proj_dim', default=64, type=int,
+    parser.add_argument('-dep_proj_dim', dest='dep_proj_dim', default=128, type=int,
                         help='size of the representations used in the bilinear classifier for parsing')
     parser.add_argument('-coe', dest='coe', default=0.3, type=float, help='value for loss addition')
     parser.add_argument('-lr', dest='lr', default=0.001, type=float, help='learning rate')
-    parser.add_argument('-epochs', dest='epochs', default=10, type=int, help='training epochs')
+    parser.add_argument('-epochs', dest='epochs', default=5, type=int, help='training epochs')
     parser.add_argument('-batch_size', dest='batch_size', default=200, type=int, help='batch size')
 
     subparsers = parser.add_subparsers(title='command', dest='command')
@@ -465,11 +470,13 @@ if __name__ == '__main__':
         # predict
         if args.best_model:
             test_path = './mdb100/test.mdb'
-            best_model_path = os.path.join('./train_log/edr:{}/'.format(name), 'model-' + str(args.best_model))
-            p, r, f1, aur, p_, r_ ,p10_result= evaluate(Model(args), best_model_path, test_path, args.batch_size)
-            plotPRCurve(p_, r_, './train_log/edr:{}'.format(name))
-            pickle.dump({'precision': p_, 'recall': r_}, open('./train_log/edr:{}/p_r.pkl'.format(name), 'wb'))
-            with open('./train_log/edr:{}/{}.txt'.format(name, 'best_model'), 'w', encoding='utf-8')as f:
+            best_model_path = os.path.join('./train_log/r:{}/'.format(name), 'model-' + str(args.best_model))
+            p, r, f1, aur, p_, r_ ,p10_result, diff_result, wrong_pred= evaluate(Model(args), best_model_path, test_path, args.batch_size)
+            plotPRCurve(p_, r_, './train_log/r:{}'.format(name))
+            pickle.dump({'precision': p_, 'recall': r_}, open('./train_log/r:{}/r_p_r.pkl'.format(name), 'wb'))
+            pickle.dump(diff_result,open('./train_log/r:{}/diff_list.pkl'.format(name), 'wb'))
+            pickle.dump(wrong_pred,open('./train_log/r:{}/wrong_pred_list.pkl'.format(name), 'wb'))
+            with open('./train_log/r:{}/{}.txt'.format(name, 'r_best_model'), 'w', encoding='utf-8')as f:
                 f.write('precision:\t{}\nrecall:\t{}\nf1:\t{}\nauc:\t{}\n'.format(p, r, f1, aur))
                 f.write(name + '\n')
                 f.write('model name:' + str(args.best_model) + '\t' + '\n')
@@ -483,14 +490,14 @@ if __name__ == '__main__':
                 f.write('\n')
                 f.close()
         else:
-            with open('./train_log/edr:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
+            with open('./train_log/r:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
                 f.write(name + '\n')
-                for model in [str(step * (args.epochs + 1) + i * step) for i in
+                for model in [str((i+1) * step) for i in
                               range(args.epochs + args.add_epochs)]:
                     f.write(model + '\t')
                     for data in ['pn1', 'pn2', 'test']:
                         data_path = './mdb100/{}.mdb'.format(data)
-                        p100, p200, p300 = evaluatepn(Model(args), os.path.join('./train_log/edr:{}/'.format(name),
+                        p100, p200, p300 = evaluatepn(Model(args), os.path.join('./train_log/r:{}/'.format(name),
                                                                                 'model-' + model), data_path,
                                                       args.batch_size)
                         logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))
