@@ -1,4 +1,6 @@
 from utils import *
+import tensorflow as tf
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from six.moves import range
 from tensorpack import *
 from tensorpack.tfutils.gradproc import GlobalNormClip, SummaryGradient
@@ -207,7 +209,7 @@ class WarmupModel(ModelDesc):
             # disallow the model from making impossible predictions
             mask_shape = tf.shape(dep_mask)
             dep_mask_ = tf.tile(tf.expand_dims(dep_mask, 1), [1, mask_shape[1], 1])
-            arc_scores += (dep_mask_ - 1) * 100
+            arc_scores += (dep_mask_ - 1) * 10000
             nn_dep_out = arc_scores
 
         dep_labels = tf.one_hot(dep_y, seq_len, axis=-1, dtype=tf.int32, name='dep_label')
@@ -340,7 +342,7 @@ class Model(ModelDesc):
             # disallow the model from making impossible predictions
             mask_shape = tf.shape(dep_mask)
             dep_mask_ = tf.tile(tf.expand_dims(dep_mask, 1), [1, mask_shape[1], 1])
-            arc_scores += (dep_mask_ - 1) * 100
+            arc_scores += (dep_mask_ - 1) * 10000
 
         # gcn encoding dependency tree structure
         dep_matrix = tf.nn.softmax(arc_scores)
@@ -359,10 +361,10 @@ class Model(ModelDesc):
                 AxW = AxW + tf.layers.dense(hidden_states_, self.gcn_dim)
                 AxW = AxW / denom
                 gAxW = tf.nn.relu(AxW)
-                hidden_states_ = Dropout(gAxW, keep_prob=0.5) if l < self.gcn_layers - 1 else gAxW
+                hidden_states_ = Dropout(gAxW, keep_prob=0.8) if l < self.gcn_layers - 1 else gAxW
 
-        hidden_states = tf.concat([hidden_states, hidden_states_],axis=-1)
-        de_out_dim = rnn_output_dim+ self.gcn_dim
+        hidden_states = hidden_states_
+        de_out_dim = self.gcn_dim
 
         # word attention
         with tf.variable_scope('word_attention') as scope:
@@ -413,7 +415,7 @@ class Model(ModelDesc):
                                 initializer=tf.contrib.layers.xavier_initializer())
             b = tf.get_variable('b', initializer=np.zeros([RELATION_TYPE_CLASS]).astype(np.float32))
             re_out = tf.nn.xw_plus_b(bag_repre, w, b)
-            re_out = Dropout(re_out, keep_prob=dropout)
+            # re_out = Dropout(re_out, keep_prob=dropout)
 
         re_logits = tf.nn.softmax(re_out, name='logits')
         re_pred = tf.argmax(re_logits, axis=1, name='pred_y')
@@ -552,6 +554,7 @@ def evaluate(model, model_path, data_path, batchsize):
 
     precsion, recall, f1 = calculate_prf(y_gold, y_pred)
     area_under_pr = average_precision_score(y_true, y_scores)
+    logger.info('AUC:{}'.format(area_under_pr))
     # precision_, recall_, threshold = precision_recall_curve(y_true, y_scores)
     precision_, recall_ ,p10_result= curve(y_scores, y_true, 2000)
 
@@ -631,7 +634,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-gpu', dest='gpu', default='0', help='gpu to use')
-    parser.add_argument('-l2', dest='l2', default=1e-4, type=float, help='l2 regularization')
+    parser.add_argument('-l2', dest='l2', default=1e-3, type=float, help='l2 regularization')
     parser.add_argument('-seed', dest='seed', default=15, type=int, help='seed for randomization')
     parser.add_argument('-rnn_dim', dest='rnn_dim', default=180, type=int, help='hidden state dimension of Bi-RNN')
     parser.add_argument('-gcn_dim', dest='gcn_dim', default=360, type=int, help='hidden state dimension of GCN')
@@ -655,7 +658,7 @@ if __name__ == '__main__':
     parser_evaluate.add_argument('-add_epochs', dest='add_epochs', default=0, type=int, help='epochs to continue')
     args = parser.parse_args()
     argdict = vars(args)
-    name = 'seed_{}'.format(argdict['seed'])
+    name = 'seed_{}_rnn_{}_gcn_{}'.format(argdict['seed'], argdict['rnn_dim'], argdict['gcn_dim'])
     logger.auto_set_dir(action='k', name=name)
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -711,15 +714,20 @@ if __name__ == '__main__':
             with open('./train_log/dr:{}/{}.txt'.format(name, name), 'w', encoding='utf-8')as f:
                 f.write(name + '\n')
                 for model in [str(step * (args.pre_epochs + 1) + i * step) for i in
-                              range(args.pre_epochs + args.add_epochs)]:
+                              range(args.epochs + args.add_epochs)]:
                     f.write(model + '\t')
-                    for data in ['pn1', 'pn2', 'test']:
+                    # for data in ['pn1', 'pn2', 'test']:
+                    for data in ['test_r']:
                         data_path = './mdb100/{}.mdb'.format(data)
-                        p100, p200, p300 = evaluatepn(Model(args), os.path.join('./train_log/dr:{}/'.format(name),
+                        p, r, f1, aur, p_, r_, p10_result = evaluate(Model(args), os.path.join('./train_log/dr:{}/'.format(name),
                                                                                 'model-' + model), data_path,
-                                                      args.batch_size)
-                        logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))
-                        line = "{:.3f}\t{:.3f}\t{:.3f}\t".format(p100, p200, p300)
-                        f.write(line)
+                                                                     args.batch_size)
+
+                        # p100, p200, p300 = evaluatepn(Model(args), os.path.join('./train_log/dr:{}/'.format(name),
+                        #                                                         'model-' + model), data_path,
+                        #                               args.batch_size)
+                        # logger.info('    {}:P@100:{:.3f}  P@200:{:.3f}  P@300:{:.3f}\n'.format(data, p100, p200, p300))
+                        # line = "{:.3f}\t{:.3f}\t{:.3f}\t".format(p100, p200, p300)
+                        # f.write(line)
                     f.write('\n')
                 f.close()

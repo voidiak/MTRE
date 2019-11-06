@@ -394,7 +394,7 @@ def posMap(pos):
 
 def procData(data, split='train'):
     result = []
-
+    count =0
     for bag in data:
         res = {}  # k-hot label
         res['X'] = [[getId(wrd, voc2id, 'UNK') for wrd in wrds] for wrds in bag['wrds_list']]
@@ -403,11 +403,14 @@ def procData(data, split='train'):
         res['DepMask'] = bag['dep_mask_list']
         res['Dep'] = bag['dep_list']
         res['Y'] = bag['rels']
+        if min(res['Y']) == 0:
+            count+=1
         res['HeadLabel'] = bag['head_label']
         res['TailLabel'] = bag['tail_label']
         res['HeadPos'] = bag['head_pos_list']
         res['TailPos'] = bag['tail_pos_list']
         result.append(res)
+    print('{}有{}个NA'.format(split,count))
     return result
 
 
@@ -443,19 +446,19 @@ def splitBags(data, chunk_size):
 
 train_data_r = procData(data['train'], 'train')
 print('train_data_r:{}'.format(len(train_data_r)))
-pickle.dump(train_data_r, open('/data/PKL{}/train_r.pkl'.format(MAX_LEN), 'wb'))
+# pickle.dump(train_data_r, open('/data/PKL{}/train_r.pkl'.format(MAX_LEN), 'wb'))
 
 train_data = splitBags(train_data_r, 100)
 print('train_data:{}'.format(len(train_data)))
-pickle.dump(train_data, open('/data/PKL{}/train.pkl'.format(MAX_LEN), 'wb'))
+# pickle.dump(train_data, open('/data/PKL{}/train.pkl'.format(MAX_LEN), 'wb'))
 
 test_data_r = procData(data['test'], 'test')
 print('test_data_r:{}'.format(len(test_data_r)))
-pickle.dump(test_data_r, open('/data/PKL{}/test_r.pkl'.format(MAX_LEN), 'wb'))
+# pickle.dump(test_data_r, open('/data/PKL{}/test_r.pkl'.format(MAX_LEN), 'wb'))
 
 test_data = splitBags(test_data_r, 100)
 print('test_data:{}'.format(len(test_data)))
-pickle.dump(test_data, open('/data/PKL{}/test.pkl'.format(MAX_LEN), 'wb'))
+# pickle.dump(test_data, open('/data/PKL{}/test.pkl'.format(MAX_LEN), 'wb'))
 
 param_data = {
     "voc2id": voc2id,
@@ -466,7 +469,7 @@ param_data = {
     'e_type2id': type2id
 }
 print('writing data')
-pickle.dump(param_data, open('/data/PKL{}/dict.pkl'.format(MAX_LEN), 'wb'))
+# pickle.dump(param_data, open('/data/PKL{}/dict.pkl'.format(MAX_LEN), 'wb'))
 
 
 
@@ -522,12 +525,12 @@ def getPNdata(data):
 
 
 p1_r, p2_r, p3_r = getPNdata(test_data_r)
-pickle.dump(p1_r, open('/data/PKL{}/pn1_r.pkl'.format(MAX_LEN), 'wb'))
-pickle.dump(p2_r, open('/data/PKL{}/pn2_r.pkl'.format(MAX_LEN), 'wb'))
-pickle.dump(p3_r, open('/data/PKL{}/pn3_r.pkl'.format(MAX_LEN), 'wb'))
-
-p1_data, p2_data, p3_data = getPNdata(test_data)
-pickle.dump(p1_data, open('/data/PKL{}/pn1.pkl'.format(MAX_LEN), 'wb'))
-pickle.dump(p2_data, open('/data/PKL{}/pn2.pkl'.format(MAX_LEN), 'wb'))
-pickle.dump(p3_data, open('/data/PKL{}/pn3.pkl'.format(MAX_LEN), 'wb'))
+# pickle.dump(p1_r, open('/data/PKL{}/pn1_r.pkl'.format(MAX_LEN), 'wb'))
+# pickle.dump(p2_r, open('/data/PKL{}/pn2_r.pkl'.format(MAX_LEN), 'wb'))
+# pickle.dump(p3_r, open('/data/PKL{}/pn3_r.pkl'.format(MAX_LEN), 'wb'))
+#
+# p1_data, p2_data, p3_data = getPNdata(test_data)
+# pickle.dump(p1_data, open('/data/PKL{}/pn1.pkl'.format(MAX_LEN), 'wb'))
+# pickle.dump(p2_data, open('/data/PKL{}/pn2.pkl'.format(MAX_LEN), 'wb'))
+# pickle.dump(p3_data, open('/data/PKL{}/pn3.pkl'.format(MAX_LEN), 'wb'))
 print('writing over')

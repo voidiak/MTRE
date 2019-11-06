@@ -29,7 +29,7 @@ def make_dir(dir_path):
 
 # 将输入列表分段为相同长度的多个列表
 def getChunks(inp_list, chunk_size):
-    return [inp_list[x:x + chunk_size] for x in range(0, len(inp_list), chunk_size)]
+    return [inp_list[x : x + chunk_size] for x in range(0, len(inp_list), chunk_size)]
 
 
 # gpu设置
@@ -37,8 +37,9 @@ def set_gpu(gpus):
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = gpus
 
+
 def get_embeddings(model, wrd_list, embed_dims):
-    embed_list=[]
+    embed_list = []
     # embed_list.append(np.zeros(embed_dims))
     # 添加OOV词向量0
     for word in wrd_list:
