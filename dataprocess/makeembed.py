@@ -9,7 +9,7 @@ import gensim
 
 
 def get_embeddings(model, wrd_list, embed_dims):
-    embed_list=[]
+    embed_list = []
     # 添加OOV词向量0
     for word in wrd_list:
         if word in model.vocab:
@@ -26,23 +26,23 @@ def get_embeddings(model, wrd_list, embed_dims):
 #         pickle.dump(embed_init, f, -1)
 
 
-if __name__ == '__main__':
-    embed_loc = '/data/MTRE-archive/glove/glove.6B.50d_word2vec.txt'
-    data = pickle.load(open('/data/MTRE/PKL/dict.pkl', 'rb'))
-    embed_path = '/data/MTRE/embeddings.pkl'
-    voc_path = '/data/MTRE/vocab.pkl'
-    voc2id = data['voc2id']
+if __name__ == "__main__":
+    embed_loc = "/data/MTRE-archive/glove/glove.6B.50d_word2vec.txt"
+    data = pickle.load(open("/data/MTRE/PKL/dict.pkl", "rb"))
+    embed_path = "/data/MTRE/embeddings.pkl"
+    voc_path = "/data/MTRE/vocab.pkl"
+    voc2id = data["voc2id"]
 
     # get word list
     word_list = list(voc2id.items())
     word_list.sort(key=lambda x: x[1])
     word_list, _ = zip(*word_list)
-    with open(voc_path, 'wb') as f:
+    with open(voc_path, "wb") as f:
         pickle.dump(word_list, f)
     print(len(word_list))
     model = gensim.models.KeyedVectors.load_word2vec_format(embed_loc, binary=False)
     embed_init = get_embeddings(model, word_list, 50)
-    print('embed size:')
+    print("embed size:")
     print(len(embed_init))
-    with open(embed_path, 'wb') as f:
+    with open(embed_path, "wb") as f:
         pickle.dump(embed_init, f)

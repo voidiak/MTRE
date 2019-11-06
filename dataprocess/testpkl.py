@@ -18,10 +18,10 @@ class Raw(DataFlow):
             # Pos1 = bag['Pos1']
             # Pos2 = bag['Pos2']
             # DepMask = bag['DepMask']
-            HeadPos = bag['HeadPos']
-            TailPos = bag['TailPos']
-            if max(max(bag['HeadPos']),max(bag['TailPos']))>100:
-                self.count+=1
+            HeadPos = bag["HeadPos"]
+            TailPos = bag["TailPos"]
+            if max(max(bag["HeadPos"]), max(bag["TailPos"])) > 100:
+                self.count += 1
             # DepLabel = bag['Dep']
             # ReLabel = bag['Y']
             # HeadLabel = bag['HeadLabel']
@@ -33,7 +33,7 @@ class Raw(DataFlow):
 
 if __name__ == "__main__":
 
-    data = pickle.load(open('/data/PKL/train.pkl', 'rb'))
+    data = pickle.load(open("/data/PKL/train.pkl", "rb"))
     ds = Raw(data)
-    LMDBSerializer.save(ds, '/data/MLRE/testpkl')
+    LMDBSerializer.save(ds, "/data/MLRE/testpkl")
     print(ds.count)
