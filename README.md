@@ -1,6 +1,6 @@
 # Multi-Task Learning for Relation Extraction
 This repository contains code for *Multi-Task Learning for Relation Extraction* in *Proceedings of 2019 IEEE 31st International Conference on Tools with Artificial Intelligence (ICTAI)*. 
-
+![](https://github.com/voidiak/MTRE/blob/master/figures/readme.png)
 ## Requirements
 * [Tensorflow](https://www.tensorflow.org/)
 * [Numpy](https://www.numpy.org)
