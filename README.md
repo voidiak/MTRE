@@ -1,5 +1,5 @@
 # Multi-Task Learning for Relation Extraction
-This repository contains code for *Multi-Task Learning for Relation Extraction* in *Proceedings of 2019 IEEE 31st International Conference on Tools with Artificial Intelligence (ICTAI)*. 
+This repository contains code for [*Multi-Task Learning for Relation Extraction*](http://ieeexplore.ieee.org/xpls/abs_all.jsp?arnumber=8995371) in *Proceedings of 2019 IEEE 31st International Conference on Tools with Artificial Intelligence (ICTAI)*. 
 ![](https://github.com/voidiak/MTRE/blob/master/figures/readme.jpg)
 ## Requirements
 * [Tensorflow](https://www.tensorflow.org/)
